@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-lang-key="appTitle">恆立批發訂單系統 | Nice One Wholesale Ordering</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+        }
+        /* Custom scrollbar styling for the cart and categories */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+        .sticky-nav {
+            top: 0;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <!-- Mock API Key for Gemini API (Not used in this simulation) -->
+    <script>const apiKey = "";</script>
+
+    <!-- Language & Data Layer Mockup -->
+    <script>
+        // --- MOCK DATA LAYER (SIMULATING QUICKBOOKS/INVENTORY) ---
+
+        // In a real application, this data would be fetched from your QuickBooks/ERP API.
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'niceone-wholesale-app';
+        let MOCK_INVENTORY_SYSTEM = new Map(); // Simulates stock levels in QB
+
+        const CATEGORIES = {
+            HOT_ITEMS: { cn: '熱門貨品', en: 'Hot Items', icon: '🔥' },
+            PERSONAL_CARE: { cn: '個人護理', en: 'Personal Care', icon: '🧼' },
+            CANNED_MEAT: { cn: '罐頭肉類', en: 'Canned Food (Meat/Fish/Pork Cubes)', icon: '🍖' },
+            INSTANT_MIXES: { cn: '即溶飲品', en: 'Instant Mixes (Coffee/Tea/Milo)', icon: '☕' },
+            SNACKS_BISCUITS: { cn: '零食餅乾/朱古力', en: 'Snacks, Biscuits & Chocolate', icon: '🍪' },
+            DAILY_NECESSITIES: { cn: '日用品 (清潔/柔順)', en: 'Daily Necessities', icon: '🧴' },
+            DRINKS_DAIRY: { cn: '飲品及奶類 (淡奶/麥片)', en: 'Drinks, Dairy & Oatmeal', icon: '🥛' },
+            SEASONING_MISC: { cn: '調味及雜項', en: 'Seasoning & Misc.', icon: '🧂' },
+        };
+        
+        // --- 產品數據: 來自所有 CSV 文件的合併和清理 ---
+
+        // Helper functions used for data processing
+        function cleanPrice(priceStr) {
+            if (!priceStr || typeof priceStr !== 'string') return 0;
+            const cleaned = priceStr.replace(/[HK$,\s]/g, '').trim();
+            if (cleaned.includes('查詢') || cleaned.includes('enquiry')) {
+                return 9999.00; // Placeholder for "per enquiry" items, must be number for sorting/sum
+            }
+            return parseFloat(cleaned) || 0;
+        }
+
+        function generateId(cnName, details) {
+            // Create a simple, short ID by hashing the first few characters
+            let id = cnName.substring(0, 5) + details.substring(0, 5);
+            // Remove non-alphanumeric characters for a clean ID key
+            return id.replace(/[^a-zA-Z0-9]/g, '');
+        }
+
+        const rawProductsData = [
+            // --- 1 香皂 Soap.csv --- (PERSONAL_CARE)
+            { cn: '力士香皂(混合)', en: 'Lux Soap (Mixed)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '264', origin: '印尼' },
+            { cn: '力士香皂(米色)', en: 'Lux Soap (Beige)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
+            { cn: '力士香皂(紫色)', en: 'Lux Soap (Purple)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
+            { cn: '力士香皂(藍色)', en: 'Lux Soap (Blue)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
+            { cn: '力士香皂(粉紅)', en: 'Lux Soap (Pink)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
+            { cn: '強生香皂', en: 'Johnsons Baby Soap', category: 'PERSONAL_CARE', details: '120g x4s x6扎', price: '162', origin: '印尼' },
+            { cn: '花王香皂', en: 'Kao White Soap', category: 'PERSONAL_CARE', details: '135g x3s x24扎', price: '288', origin: '日本' },
+            { cn: '滴露薄荷香皂 (105gx4)', en: 'Dettol Cool Soap. (105gx4)', category: 'PERSONAL_CARE', details: '105g x4塊 x36扎', price: '414', origin: '印尼' },
+            { cn: '滴露薄荷香皂 (100gx6)', en: 'Dettol Cool Soap. (100gx6)', category: 'PERSONAL_CARE', details: '100g x6s X24扎', price: '414', origin: '印尼' },
+            { cn: '滴露薄荷香皂 (淺藍色)', en: 'Dettol Cool Soap. (Light Blue)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露舒膚香皂 (粉紅色)', en: 'Dettol Soap (Pink)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露清新香皂 (黃色)', en: 'Dettol Soap (Yellow)', category: 'PERSONAL_CARE', details: '105g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露蘆薈牛油果香皂 (淺綠色)', en: 'Dettol Soap (Aloe Avocado)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露薰衣草香皂 (紫色)', en: 'Dettol Soap (Lavender)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露香橙味香皂 (橙色)', en: 'Dettol Soap (Orange)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露蜜瓜味香皂 (玉綠色)', en: 'Dettol Soap (Melon)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
+            { cn: '滴露原味香皂 (綠色)', en: 'Dettol Soap (Original)', category: 'PERSONAL_CARE', details: '100g x4s x36扎', price: '414', origin: '印尼' },
+            
+            // --- 2香皂 Soap.csv --- (PERSONAL_CARE)
+            { cn: '多芬香皂 (原味)', en: 'Dove Soup (Original)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
+            { cn: '多芬香皂 (其他味-1)', en: 'Dove Soup (Assorted-1)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
+            { cn: '多芬香皂 (其他味-2)', en: 'Dove Soup (Assorted-2)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
+            { cn: '多芬香皂 (其他味-3)', en: 'Dove Soup (Assorted-3)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
+            { cn: '棕欖玫瑰牛乳香皂 (粉紅)', en: 'Palmolive Soup (Rose Milk)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
+            { cn: '棕欖蘆薈橄欖香皂 (綠色)', en: 'Palmolive Soup (Aloe Olive)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
+            { cn: '棕欖嫩白珍珠香皂 (紫色)', en: 'Palmolive Soup (White Pearl)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
+            { cn: '棕欖香皂 (粉紅-大)', en: 'Palmolive Soap (Pink-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
+            { cn: '棕欖香皂 (綠色-大)', en: 'Palmolive Soap (Green-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
+            { cn: '棕欖香皂 (紫色-大)', en: 'Palmolive Soap (Purple-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
+            { cn: '加信氏香皂', en: 'Cussons Bathing Soap', category: 'PERSONAL_CARE', details: '115g x4s x18', price: '198.00', origin: '印尼' },
+            
+            // --- 食品.csv --- (SNACKS_BISCUITS)
+            { cn: '洽洽 香瓜子', en: 'ChaCha Sunflower Seeds', category: 'SNACKS_BISCUITS', details: '260g x 20包', price: '220', origin: '中國' },
+            { cn: '麥維他消化餅', en: 'McVitie\'s Digestive Biscuit(s)', category: 'SNACKS_BISCUITS', details: '400g x 2條 x 9包', price: '153', origin: '西班牙' },
+            { cn: 'MIXX BEEF 牛肉味蘇打餅', en: 'MIXX Crackers Beef Flavour', category: 'SNACKS_BISCUITS', details: '280g x 16', price: '176', origin: '中國' },
+            { cn: '奧利奧夾心餅干 (混合口味)', en: 'Oreo Sandwich Biscuit (Mixed)', category: 'SNACKS_BISCUITS', details: '28.5g x 12包', price: '124.00', origin: '印尼' },
+            { cn: '黃油味蛋卷', en: 'MIXX Funnyq Waffle Eggrolls (Butter)', category: 'SNACKS_BISCUITS', details: '208g X 16', price: '176', origin: '中國' },
+            { cn: '利脆芝士夾心餅', en: 'Ritz Tray Cheese', category: 'SNACKS_BISCUITS', details: '27g x 9條 x 12包', price: '138', origin: '印尼' },
+            { cn: '原味蛋卷', en: 'MIXX Funnyq Waffle Eggrolls (Original)', category: 'SNACKS_BISCUITS', details: '208g x 16', price: '176', origin: '中國' },
+            { cn: '利脆烘烤脆片-忌廉洋蔥味', en: 'RITZ Toasted Chips Sour Cream And Onion Crackers', category: 'SNACKS_BISCUITS', details: '6 x 229g', price: '120.00', origin: '越南' },
+            { cn: '黑松露蘇打餅', en: 'Black Truffle Soda Crackers', category: 'SNACKS_BISCUITS', details: '280g x 16', price: '176', origin: '中國' },
+            { cn: '利是烘烤脆片-車打芝士味', en: 'RITZ Toasted Chips Cheese', category: 'SNACKS_BISCUITS', details: '6 x 229g', price: '120.00', origin: '越南' },
+            { cn: '利是-脆餅', en: 'RITZ-Crackers', category: 'SNACKS_BISCUITS', details: '12 x (3 x100g.)', price: '100.00', origin: '印尼' },
+            
+            // --- 飲品， 奶類， 麥片，梳打粉， 粟粉.csv --- (DRINKS_DAIRY / SEASONING_MISC)
+            { cn: '寶礦力(英文版)', en: 'Pocari Sweat (English Version)', category: 'DRINKS_DAIRY', details: '500毫升 x24支', price: '95.00', origin: '印尼' },
+            { cn: '金罐紅牛', en: 'Redbull(Thailand)', category: 'DRINKS_DAIRY', details: '250毫升 x6罐 x 4排', price: '75', origin: '越南' },
+            { cn: '三花植脂淡奶', en: 'Nestlé Carnation Evaporated Milk', category: 'DRINKS_DAIRY', details: '405g x 48罐', price: '280', origin: '泰國' },
+            { cn: '三花甜奶(煉奶)', en: 'Nestlé Sweetened Milk', category: 'DRINKS_DAIRY', details: '388g x 48罐', price: '265', origin: '泰國' },
+            { cn: '雀巢鷹嘜煉奶', en: 'Nestlé Eagle Sweetened Condensed Milk', category: 'DRINKS_DAIRY', details: '350g x48罐', price: '580', origin: '中國' },
+            { cn: '克寧高鈣全家人奶粉', en: 'Klim Whole Family milk powder', category: 'DRINKS_DAIRY', details: '2.2公斤x6罐', price: '768', origin: '新西蘭' },
+            { cn: '雀巢100%全脂奶粉', en: 'NESPRAY INSTANT FULL CREAM MILK POWDER', category: 'DRINKS_DAIRY', details: '2.1公斤x6罐', price: '858', origin: '新西蘭' },
+            { cn: '桂格快熟燕麥片 (藍色)', en: 'Quaker Instant Oatmeal (Blue)', category: 'DRINKS_DAIRY', details: '800g x 12包', price: '192.00', origin: '馬來西亞' },
+            { cn: '桂格即食燕麥片 (紅色)', en: 'Quaker Instant Oatmeal (Red)', category: 'DRINKS_DAIRY', details: '800g x 12包', price: '192.00', origin: '馬來西亞' },
+            { cn: '維他麥營養麥片 (南瓜)', en: 'Vitamax Oatmeal drink (Pumpkin)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '440', origin: '中國' },
+            { cn: '維他麥營養麥片 (紅糙米)', en: 'Vitamax Oatmeal drink (Red Rice)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '420', origin: '中國' },
+            { cn: '維他麥營養麥片 (黑米)', en: 'Vitamax Oatmeal drink (Black Rice)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '420', origin: '中國' },
+            { cn: '手 牌多用途梳打粉', en: 'ARM&HAMMER Baking Soda', category: 'SEASONING_MISC', details: '454g x 24盒', price: '192', origin: '美國' },
+            { cn: 'EUROSTAR 多用途梳打粉', en: 'Eurostar Baking Soda', category: 'SEASONING_MISC', details: '454g x 24盒', price: '144.00', origin: '中國' },
+            { cn: '家樂牌大鷹 粉', en: 'Knorr Kingsford\'s Corn Starch', category: 'SEASONING_MISC', details: '420g x 24盒', price: '219.00', origin: '中國' },
+            
+            // --- 日用品 Daily Necessities.csv --- (DAILY_NECESSITIES / PERSONAL_CARE)
+            { cn: '汰漬洗衣粉 350克', en: 'Tide Laundry Powder 350g', category: 'DAILY_NECESSITIES', details: '350克 x 36袋', price: '230', origin: '越南' },
+            { cn: '汰漬洗衣粉 690克', en: 'Tide Laundry Powder 690克', category: 'DAILY_NECESSITIES', details: '690克 x 18袋', price: '224', origin: '越南' },
+            { cn: '汰漬洗衣粉 2.25公斤', en: 'Tide Laundry Powder 2.25kg', category: 'DAILY_NECESSITIES', details: '2.25公斤 x 5袋', price: '210', origin: '越南' },
+            { cn: '汰漬洗衣粉 3.6公斤', en: 'Tide Laundry Powder 3.6kg', category: 'DAILY_NECESSITIES', details: '3.6公斤 x 3袋', price: '186', origin: '越南' },
+            { cn: '汰漬洗衣粉 8.5公斤', en: 'Tide Laundry Powder 8.5kg', category: 'DAILY_NECESSITIES', details: '8.5公斤 x 2袋', price: '270', origin: '越南' },
+            { cn: 'ARIEL 洗衣液 (補充裝)', en: 'Ariel laundry detergent refill', category: 'DAILY_NECESSITIES', details: '2公斤 x 6袋', price: '252', origin: '越南' },
+            { cn: 'DOWNY 柔順劑 (藍)', en: 'Downy Fabric Softener (Blue)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
+            { cn: 'DOWNY 柔順劑 (黑)', en: 'Downy Fabric Softener (Black)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
+            { cn: 'DOWNY 柔順劑 (紅)', en: 'Downy Fabric Softener (Red)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
+            { cn: '棕欖洗髮露 (綠色) (健康順滑)', en: 'Palmolive Shampoo (Green - Healthy Smooth)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
+            { cn: '棕欖洗髮露 (桃紅色) (深層滋養乾性)', en: 'Palmolive Shampoo (Pink - Deep Nourish)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
+            { cn: '棕欖洗髮露 (紫色) (絲滑順直)', en: 'Palmolive Shampoo (Purple - Silky Straight)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
+            { cn: '棕欖洗髮露 (藍色) (中性均衡)', en: 'Palmolive Shampoo (Blue - Neutral Balance)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
+            { cn: '高露潔三層功效牙膏', en: 'Colgate Triple Action Toothpaste', category: 'PERSONAL_CARE', details: '(180克 x 6支 x 8套) x2', price: '568', origin: '越南' },
+            { cn: '高露潔牙刷', en: 'Colgate Toothbrush', category: 'PERSONAL_CARE', details: '12支 x 24打', price: '550', origin: '越南' },
+            { cn: '陽光洗潔精 (大)', en: 'Sunlight Dishwashing liquid (Large)', category: 'DAILY_NECESSITIES', details: '1500ml x 9支', price: '162.00', origin: '中國' },
+            { cn: '陽光洗潔精 (小)', en: 'Sunlight Dishwashing liquid (Small)', category: 'DAILY_NECESSITIES', details: '750ml X15枝裝', price: '150.00', origin: '中國' },
+            
+            // --- INSTANT COFFEE MILKTEA 1.csv --- (INSTANT_MIXES)
+            { cn: 'CAFFINO 泡沫咖啡 (經典)', en: 'CAFFINO Cappuccino Org', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
+            { cn: 'CAFFINO 泡沫咖啡 (摩卡)', en: 'CAFFINO Cappuccino Moca', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
+            { cn: 'CAFFINO 泡沫咖啡 (榛子)', en: 'CAFFINO Cappuccino Hazel nuts', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
+            { cn: 'CAFFINO 泡沫咖啡二合一 (無糖)', en: 'CAFFINO Cappuccino No added sugar (2in1)', category: 'INSTANT_MIXES', details: '13 g x 10s x 24', price: '192', origin: '印尼' },
+            { cn: 'CAFFINO拿鐵咖啡 (特濃)', en: 'CAFFINO Cappuccino Bold', category: 'INSTANT_MIXES', details: '27 g x 6s x 24袋', price: '192', origin: '印尼' },
+            { cn: 'CAFFINO泡沫咖啡 (特級)', en: 'CAFFINO Dark Cappuccino', category: 'INSTANT_MIXES', details: '25 g x 6s x 24袋', price: '192', origin: '印尼' },
+            { cn: '雀巢即溶咖啡 (200g)', en: 'NESCAFÉ instant coffee powder 200g', category: 'INSTANT_MIXES', details: '200 g x 12樽', price: '384', origin: '新加坡' },
+            { cn: '雀巢即溶咖啡 (500g)', en: 'NESCAFÉ instant coffee powder 500g', category: 'INSTANT_MIXES', details: '500 g x 6', price: '462', origin: '中國' },
+            { cn: '雀巢金牌咖啡', en: 'NESCAFÉ GOLD', category: 'INSTANT_MIXES', details: '190 g x 6s', price: '342', origin: '馬來西亞' },
+            { cn: '雀巢3合1咖啡 (47條）', en: 'NESCAFÉ 3 in 1 instant coffee (47s)', category: 'INSTANT_MIXES', details: '19 g x 47s x 18袋', price: '738', origin: '新加坡' },
+            { cn: '舊街埸3合1白咖啡 (經典)', en: 'OLD TOWN WHITE COFFEE (Classic)', category: 'INSTANT_MIXES', details: '38 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸3合1白咖啡 (特濃)', en: 'OLD TOWN WHITE COFFEE (Rich)', category: 'INSTANT_MIXES', details: '35 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸3合1白咖啡 (榛果)', en: 'OLD TOWN WHITE COFFEE (Hazelnut)', category: 'INSTANT_MIXES', details: '38 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸3合1白咖啡 (低糖)', en: 'OLD TOWN WHITE COFFEE (Less Sugar)', category: 'INSTANT_MIXES', details: '35 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸2合1白咖啡 (無糖)', en: 'OLD TOWN WHITE COFFEE (2in1 No Sugar)', category: 'INSTANT_MIXES', details: '25 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸3合1白咖啡 (蔗糖)', en: 'OLD TOWN WHITE COFFEE (Cane Sugar)', category: 'INSTANT_MIXES', details: '36 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: '舊街埸白奶茶', en: 'OLD TOWN WHITE MILKTEA', category: 'INSTANT_MIXES', details: '35 g x 13s x 20袋', price: '600.00', origin: '馬來西亞' },
+            { cn: 'GADJAH 滴咖啡', en: 'GADJAH DRIP COFFEE', category: 'INSTANT_MIXES', details: '7.5G x 6 x 24', price: '312.00', origin: '印尼' },
+            { cn: '雀巢3合1咖啡 (30包)', en: 'NESCAFÉ 3 in 1 instant coffee (30s)', category: 'INSTANT_MIXES', details: '24包x30 x 19 g', price: '648', origin: '馬來西亞' },
+            { cn: '立頓金裝倍醇奶茶', en: 'LIPTON Milk Tea Gold', category: 'INSTANT_MIXES', details: '24包x16.5g x 12', price: '396.00', origin: '中國' },
+            
+            // --- INSTANT COFFEE MILKTEA 2.csv --- (INSTANT_MIXES)
+            { cn: '澤合怡保白咖啡2合1 (無糖)', en: 'Chek Hup Ipoh White Coffee 2 in 1 (No Sugar)', category: 'INSTANT_MIXES', details: '30g x 12s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '澤合怡保白咖啡3合1 (香濃)', en: 'Chek Hup 3 in 1 Ipoh White Coffee (Rich & Creamy)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '澤合怡保白咖啡3合1 (原味)', en: 'Chek Hup Ipoh White Coffee 3 in 1 (Original)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '澤合怡保白咖啡3合1 (少糖)', en: 'Chek Hup Ipoh White Coffee 3 in 1 (Less sugar)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '澤合3合1奶荼', en: 'Chek Hup Ipoh Milk Tea 3 in 1', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '咖啡先生3合1 即溶咖啡', en: 'Mr. Coffee 3-in-1 Instant Coffee', category: 'INSTANT_MIXES', details: '20g x 40s x 20袋', price: '640', origin: '馬來西亞' },
+            { cn: '奶茶先生3合1即溶奶茶', en: 'Mr. Milk Tea 3-in-1 Milk tea', category: 'INSTANT_MIXES', details: '20g x 30s x 24袋', price: '825', origin: '馬來西亞' },
+            { cn: 'UCC 666 精選即溶咖啡', en: 'UCC 666 Instant Coffee', category: 'INSTANT_MIXES', details: '100G x 12支', price: '240', origin: '越南' },
+            { cn: '壩羅喜多美白咖啡 (原味)', en: 'Hicomi White Coffee (Original)', category: 'INSTANT_MIXES', details: '40g x 15s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '壩羅喜多美3合1貓山王榴槤白咖啡', en: 'Hicomi White Coffee (Durian)', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '壩羅喜多美2合1 白咖啡 (無糖)', en: 'Hicomi White Coffee 2 in 1 (No Sugar)', category: 'INSTANT_MIXES', details: '25g x 15s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '壩羅喜多美3合1 白咖啡 (特濃)', en: 'Hicomi White Coffee (Bold)', category: 'INSTANT_MIXES', details: '40g x 15s x 20袋', price: '600', origin: '馬來西亞' },
+            { cn: '亞發金牌白咖啡', en: 'Ah Huat White Coffee Medal', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
+            { cn: '亞發特濃白咖啡', en: 'Ah Huat White Coffee Rich', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
+            { cn: '亞發榛果蔗糖白咖啡', en: 'Ah Huat White Coffee Cane Sugar', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
+            { cn: '亞發低脂白咖啡', en: 'Ah Huat White Coffee Low fat', category: 'INSTANT_MIXES', details: '32g x 15s x 20袋', price: '580', origin: '馬來西亞' },
+            
+            // --- INSTANT COFFEE MILKTEA 3.csv --- (INSTANT_MIXES / DRINKS_DAIRY)
+            { cn: 'GOOD DAY3合1即溶咖啡 (榛子)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Hazelnut)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
+            { cn: 'GOOD DAY3合1即溶咖啡 (朱古力)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Chocolate)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
+            { cn: 'GOOD DAY3合1即溶咖啡 (莫卡)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Mocha)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
+            { cn: 'GOOD DAY3合1即溶咖啡 (原味)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Original)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
+            { cn: 'GOOD DAY3合1即溶咖啡 (雲尼拿)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Vanilla)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
+            { cn: '雀巢咖啡伴侶400 g', en: 'Nestlé Coffee-mate 400g', category: 'INSTANT_MIXES', details: '400 g x 15樽', price: '232.5', origin: '泰國' },
+            { cn: '雀巢咖啡伴侶450 g', en: 'Nestlé Coffee-mate 450g', category: 'INSTANT_MIXES', details: '450 g x 24袋', price: '324', origin: '泰國' },
+            { cn: '雀巢咖啡伴侶1公斤', en: 'Nestlé Coffee-mate 1kg', category: 'INSTANT_MIXES', details: '1公斤 x 12袋', price: '360', origin: '泰國' },
+            { cn: 'G7-3合1咖啡', en: 'G7 3 in 1 Instant coffee', category: 'INSTANT_MIXES', details: '10 x 50s', price: '395', origin: '越南' },
+            { cn: '雀巢美祿 (罐裝-400g)', en: 'Milo 400g in Tin', category: 'INSTANT_MIXES', details: '400 g x 24 can', price: '480', origin: '馬來西亞' },
+            { cn: '雀巢美祿 (袋裝-1kg)', en: 'Milo 1kg in Bag', category: 'INSTANT_MIXES', details: '1公斤 x 12袋', price: '474', origin: '馬來西亞' },
+            { cn: '雀巢美祿1.8公斤', en: 'Milo 1.8kg in Tin', category: 'INSTANT_MIXES', details: '1.8公斤 x 6 can', price: '468', origin: '馬來西亞' },
+            { cn: '雀巢美祿3合1 (獨立包裝)', en: 'Milo 3 in 1 sachets', category: 'INSTANT_MIXES', details: '35 g x 18s x18袋', price: '648', origin: '馬來西亞' },
+            { cn: '阿華田 400 g', en: 'Ovaltine 400g', category: 'INSTANT_MIXES', details: '400 g x 12樽', price: '264', origin: '泰國' },
+            { cn: '阿華田 1.15公斤 (上海版)', en: 'Ovaltine 1.15kg (Shanghai)', category: 'INSTANT_MIXES', details: '1.15公斤 x 6 can', price: '342', origin: '中國' },
+            { cn: '阿華田3合1 (獨立包裝)', en: 'Ovaltine 3in1 sachets', category: 'INSTANT_MIXES', details: '30 g x 20s x12袋', price: '324', origin: '中國' },
+            { cn: '好立克', en: 'Horlicks Powder', category: 'INSTANT_MIXES', details: '2公斤 x 6 can', price: '560', origin: '泰國' },
+            { cn: '好立克朱古力', en: 'Horlicks Chocolate Powder', category: 'INSTANT_MIXES', details: '400 g X24', price: '480', origin: '馬來西亞' },
+            { cn: '吉百利朱古力粉', en: 'Cadbury Drinking Chocolate', category: 'INSTANT_MIXES', details: '500 g x 6 can', price: '185', origin: '英國' },
+            
+            // --- 罐頭食品(午餐肉).csv --- (CANNED_MEAT)
+            { cn: '長城牌火腿豬肉 (198g)', en: 'Greatwall Pork and Ham 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '792', origin: '中國' },
+            { cn: '長城牌火腿豬肉 (340g)', en: 'Greatwall Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '840', origin: '中國' },
+            { cn: '樂天特級午餐肉', en: 'Lotte Luncheon Meat Premium', category: 'CANNED_MEAT', details: '340g x 24罐', price: '336.00', origin: '韓國' },
+            { cn: '韓城韓國午餐肉', en: 'Hansung Korean Luncheon Meat', category: 'CANNED_MEAT', details: '340g x 24罐', price: '288.00', origin: '韓國' },
+            { cn: '天龍牌午餐肉', en: 'Skydragon Luncheon Meat', category: 'CANNED_MEAT', details: '397g x 48罐', price: '560', origin: '中國' },
+            { cn: '天龍牌火腿豬肉 (198g)', en: 'Skydragon Pork and Ham 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '710', origin: '中國' },
+            { cn: '天龍牌火腿豬肉 (340g)', en: 'Skydragon Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '710', origin: '中國' },
+            { cn: '珍寶雞午餐肉', en: 'JUMBO Chicken Luncheon Meat', category: 'CANNED_MEAT', details: '397g x 24 x 2', price: '540', origin: '中國' },
+            { cn: '珍寶午餐肉', en: 'JUMBO Luncheon Meat (198g)', category: 'CANNED_MEAT', details: '198g x 12 x 3 x 2', price: '520', origin: '中國' },
+            { cn: '減鹽午餐肉', en: 'Spam (Less Sodium)', category: 'CANNED_MEAT', details: '8s x 340g', price: '200', origin: '美國' },
+            { cn: '天壇牌火腿豬肉 (易拉罐 198g)', en: 'HEAVEN TEMPLE Pork and Ham (EASY OPEN 198g)', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '760', origin: '中國' },
+            { cn: '天壇牌火腿豬肉 (340g)', en: 'HEAVEN TEMPLE Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '840', origin: '中國' },
+            { cn: '天壇牌火腿豬肉 (397g)', en: 'HEAVEN TEMPLE Pork and Ham 397g', category: 'CANNED_MEAT', details: '(397g x 24罐) x2', price: '880', origin: '中國' },
+            { cn: '梅林牌午餐肉 (170gx3)', en: 'Marling Luncheon Meat (3x170g)', category: 'CANNED_MEAT', details: '[(3罐 x170g ) x8扎]x4', price: '704', origin: '中國' },
+            { cn: '梅林牌優質火腿午餐肉', en: 'Marling Luncheon Meat premium', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '638', origin: '中國' },
+            { cn: '梅林牌午餐肉340g', en: 'Marling Luncheon Meat 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '480', origin: '中國' },
+            { cn: '梅林牌午餐肉198g', en: 'Marling Luncheon Meat 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '560', origin: '中國' },
+            { cn: '梅林牌午餐肉397g', en: 'Marling Luncheon Meat 397g', category: 'CANNED_MEAT', details: '397g x 48罐', price: '624', origin: '中國' },
+            
+            // --- 調味料 ， 罐頭食品 (魚) 罐頭食品 (五香、回鍋).csv --- (SEASONING_MISC / CANNED_MEAT)
+            { cn: 'NUTELLA榛子醬 350 g', en: 'Nutella Hazelnut Spread 350g', category: 'SEASONING_MISC', details: '350 g x 15樽', price: '367', origin: '美國' },
+            { cn: 'NUTELLA榛子醬 750 g', en: 'Nutella Hazelnut Spread 750g', category: 'SEASONING_MISC', details: '750 g x 6樽', price: '288', origin: '美國' },
+            { cn: '頂好牌花生醬 (幼滑) 16.3盎司', en: 'Skippy Creamy Peanut Butter 16.3oz', category: 'SEASONING_MISC', details: '462 g x 12樽', price: '320', origin: '美國' },
+            { cn: '頂好牌花生醬 (粗粒) 16.3盎司', en: 'Skippy Chunky Peanut Butter 16.3oz', category: 'SEASONING_MISC', details: '462 g x 12樽', price: '320', origin: '美國' },
+            { cn: '頂好牌花生醬 (幼滑) 1360 g', en: 'Skippy Creamy Peanut Butter 1360g', category: 'SEASONING_MISC', details: '1360 g x 6樽', price: '288', origin: '美國' },
+            { cn: '頂好牌花生醬 (粗粒) 1360 g', en: 'Skippy Chunky Peanut Butter 1360g', category: 'SEASONING_MISC', details: '1360 g x 6樽', price: '288', origin: '美國' },
+            { cn: 'LIN 砂糖 2公斤', en: 'LIN Sugar 2kg', category: 'SEASONING_MISC', details: '2公斤 x 6包', price: '108', origin: '泰國' },
+            { cn: 'LIN 砂糖 5公斤', en: 'LIN Sugar 5kg', category: 'SEASONING_MISC', details: '5公斤 x 4包', price: '172', origin: '泰國' },
+            { cn: '家樂牌袋裝雞粉', en: 'Knorr Chicken Powder (Bag)', category: 'SEASONING_MISC', details: '1公斤 x 12包', price: '264', origin: '中國' },
+            { cn: '珠江橋牌豆豉鯪魚', en: 'Pearl River Bridge Fried Dace with Salted Black Beans', category: 'CANNED_MEAT', details: '(227 g x24罐) x2', price: '960.00', origin: '中國' },
+            { cn: '天龍牌豆豉鯪魚', en: 'Skydragon Fried Dace with Salted Black Beans', category: 'CANNED_MEAT', details: '(184 g x24罐) x2', price: '480', origin: '中國' },
+            { cn: '古龍牌原味黃花魚', en: 'Yellow Croaker (Original)', category: 'CANNED_MEAT', details: '120 g x 24罐', price: '240', origin: '中國' },
+            { cn: '古龍牌豆豉黃花魚', en: 'Yellow Croaker (Salted Black Beans)', category: 'CANNED_MEAT', details: '120 g x 24罐', price: '240', origin: '中國' },
+            { cn: '古龍牌丁香魚', en: 'Gulong Anchovies', category: 'CANNED_MEAT', details: '110 g x 24樽', price: '224', origin: '中國' },
+            { cn: '天龍牌五香肉丁', en: 'Sky Dragon Spiced Pork Cubes', category: 'CANNED_MEAT', details: '(142 g x48罐) x2', price: '810.00', origin: '中國' },
+            { cn: '水仙花牌五香肉丁', en: 'Narcissus Spiced Pork Cubes', category: 'CANNED_MEAT', details: '(142 g x48罐) x2', price: '1050.00', origin: '中國' },
+            { cn: '金錢-金獎豆豉鯪魚 184G', en: 'Golden Coin Fried Dace with Salted Black Beans 184G', category: 'CANNED_MEAT', details: '(184g x 24) x2', price: '384.00', origin: '中國' },
+            
+            // --- 罐頭食品（其他).csv --- (CANNED_MEAT)
+            { cn: '天龍牌咸牛肉', en: 'Skydragon Corned Beef Round', category: 'CANNED_MEAT', details: '(240 g x 24罐) x2', price: '560', origin: '中國' },
+            { cn: '梅林牌榨菜肉絲', en: 'MaLing Pork & Preserved Vegetable', category: 'CANNED_MEAT', details: '(240 g x 24罐) x2', price: '624', origin: '中國' },
+            { cn: '古龍牌香燜花生', en: 'Gulong Braised Peanuts', category: 'CANNED_MEAT', details: '170 g x 48罐', price: '240', origin: '中國' },
+            { cn: '古龍牌炒三絲', en: 'Gulong Fried Shredded Meat and Vegetables', category: 'CANNED_MEAT', details: '198 g x48罐', price: '504', origin: '中國' },
+            { cn: '梅林牌回鍋肉', en: 'Ma Ling Szechuan Sliced Pork', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '700.00', origin: '中國' },
+            { cn: '古龍牌香菇肉醬', en: 'Gulong Mushroom Meat Sauce', category: 'CANNED_MEAT', details: '180 g x 48罐', price: '408', origin: '中國' },
+            { cn: '古龍牌紅燒排骨', en: 'Gulong Braised Spare Ribs', category: 'CANNED_MEAT', details: '256g x 48罐', price: '800', origin: '中國' },
+            { cn: '古龍牌香菜心', en: 'Gulong Pickled Cabbage Hearts', category: 'CANNED_MEAT', details: '170 g x 48', price: '240', origin: '中國' },
+            { cn: '長城牌咸牛肉', en: 'Greatwall Corned Beef Round', category: 'CANNED_MEAT', details: '340g x48 罐', price: '840', origin: '中國' },
+            { cn: '古龍牌花生湯', en: 'Gulong Peanut Soup', category: 'CANNED_MEAT', details: '312 g x48罐', price: '278.4', origin: '中國' },
+            { cn: '古龍牌紅燒豬肉', en: 'Gulong Braised Pork', category: 'CANNED_MEAT', details: '256 g x48罐', price: '552', origin: '中國' },
+            { cn: '大龍牌回鍋肉', en: 'Sky Dragon Sliced Pork in Szechuan Style', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '684.00', origin: '中國' },
+            { cn: '古龍牌香菇豬腳腿', en: 'Gulong Mushroom Pork Knuckle', category: 'CANNED_MEAT', details: '397g x 24', price: '480', origin: '中國' },
+            
+            // --- 朱古力2.csv --- (SNACKS_BISCUITS)
+            { cn: '士力架迷你朱古力', en: 'Sneakers Minis Chocolate', category: 'SNACKS_BISCUITS', details: '(227g x24s)', price: '請向我們查詢 per enquiry', origin: '未知' },
+            { cn: '迷你黑色三角朱古力', en: 'Toblerone Mini Black Chocolate', category: 'SNACKS_BISCUITS', details: '(200g x20s)', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角牛奶朱古力 (迷你)', en: 'Toblerone Mini Milk Chocolate (Mini)', category: 'SNACKS_BISCUITS', details: '(100g x20s)x4.', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角牛奶朱古力 (分享裝)', en: 'Toblerone Milk Chocolate (Sharing)', category: 'SNACKS_BISCUITS', details: '160g分享庄 x 12', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角黑朱古力 (100g)', en: 'Toblerone Black Chocolate (100g)', category: 'SNACKS_BISCUITS', details: '100g x4 x20s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角黑巧g 力 (分享裝)', en: 'Toblerone Black Chocolate (Sharing)', category: 'SNACKS_BISCUITS', details: '160g分享庄 x 12s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '迷你黃色三角朱古', en: 'Toblerone Mini Chocolate (Yellow)', category: 'SNACKS_BISCUITS', details: '20包x200g', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角白色朱古力 (100g)', en: 'Toblerone White Chocolate (100g)', category: 'SNACKS_BISCUITS', details: '100g x20sx4.', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角白朱古力 (360g)', en: 'Toblerone White Chocolate (360g)', category: 'SNACKS_BISCUITS', details: '360 X 10s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '三角朱古力 杏仁', en: 'Toblerone Nut Chocolate', category: 'SNACKS_BISCUITS', details: '360g x 10', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: '迷你白色三角朱古力', en: 'Toblerone Mini White Chocolate', category: 'SNACKS_BISCUITS', details: '20sx200g', price: '請向我們查詢 per enquiry', origin: '瑞士' },
+            { cn: 'Orient 朱古力 (混合)', en: 'Orient Chocolate (Mixed)', category: 'SNACKS_BISCUITS', details: '400g x 12', price: '請向我們查詢 per enquiry', origin: '土耳其' },
+        ];
+
+        // Process raw data into the final PRODUCTS array
+        const PRODUCTS = rawProductsData.map(p => {
+            let isHot = false;
+            // Hot Item logic
+            if (p.cn.includes('力士香皂') && p.cn.includes('(混合)')) {
+                isHot = true;
+            } else if (p.cn.includes('長城牌火腿豬肉') && p.details.includes('340g')) {
+                isHot = true;
+            } else if (p.cn.includes('高露潔三層功效牙膏')) {
+                isHot = true;
+            } else if (p.cn.includes('樂天特級午餐肉')) {
+                isHot = true;
+            } else if (p.cn.includes('CAFFINO 泡沫咖啡 (經典)')) {
+                isHot = true;
+            }
+
+            const processedProduct = {
+                id: generateId(p.cn, p.details),
+                cn: p.cn,
+                en: p.en,
+                category: p.category,
+                details: p.details,
+                price: cleanPrice(p.price),
+                origin: p.origin || '未知',
+                isHot: isHot,
+            };
+
+            return processedProduct;
+        }).map((p, index, array) => {
+             // Second pass for true uniqueness check if needed, but for now we rely on the generated ID
+             // If a product has a duplicate ID after the first pass, append index
+             let count = 0;
+             const originalId = p.id;
+             while (array.filter(item => item.id === p.id).length > 1) {
+                 p.id = originalId + '_' + count++;
+             }
+             return p;
+        });
+
+        // Function to simulate QuickBooks data fetch (Async operation)
+        function fetchProductData(productId) {
+            return new Promise(resolve => {
+                setTimeout(() => { // Simulate network latency
+                    const product = PRODUCTS.find(p => p.id === productId);
+                    if (product) {
+                        const stock = MOCK_INVENTORY_SYSTEM.get(productId) || 0;
+                        resolve({ ...product, stock });
+                    } else {
+                        resolve(null);
+                    }
+                }, 50);
+            });
+        }
+
+        // Function to simulate QuickBooks stock check (Real-time data feed)
+        function checkInventory(productId) {
+            return MOCK_INVENTORY_SYSTEM.get(productId) || 0;
+        }
+
+        // --- GLOBAL APP STATE & UI LOGIC ---
+        let currentLang = 'cn'; // 'cn' for Traditional Chinese, 'en' for English
+        let cart = {}; // { productId: quantity_in_cartons }
+        let currentFilter = 'HOT_ITEMS';
+        let isCartOpen = false;
+        
+        // ** 新增：WhatsApp 目標電話號碼 **
+        const WHATSAPP_NUMBER = "65752256";
+
+        const langDict = {
+            appTitle: { cn: '恆立批發訂單系統', en: 'Nice One Wholesale Ordering' },
+            companyName: { cn: '恆立（香港)有限公司', en: 'Nice One (HK) Ltd.' },
+            orderingSystem: { cn: '電子訂單系統', en: 'E-Ordering System' },
+            product: { cn: '產品', en: 'Product' },
+            details: { cn: '規格', en: 'Details' },
+            price: { cn: '價格(箱)', en: 'Price (Carton)' },
+            origin: { cn: '產地', en: 'Origin' },
+            stock: { cn: '庫存', en: 'Stock' },
+            quantity: { cn: '訂購數量', en: 'Qty (Carton)' },
+            addToCart: { cn: '加入訂單', en: 'Add to Order' },
+            inStock: { cn: '有貨', en: 'In Stock' },
+            lowStock: { cn: '貨量緊張', en: 'Low Stock' },
+            outOfStock: { cn: '缺貨', en: 'Out of Stock' },
+            perEnquiry: { cn: '請向我們查詢', en: 'Price Upon Enquiry' },
+            viewOrder: { cn: '查看訂單', en: 'View Order' },
+            cartTitle: { cn: '客戶訂單 (箱)', en: 'Customer Order (Cartons)' },
+            totalItems: { cn: '總訂購箱數', en: 'Total Cartons' },
+            totalAmount: { cn: '預計總金額', en: 'Est. Total Amount' },
+            emptyCart: { cn: '訂單為空，請加入貨品', en: 'Your order is empty. Please add items.' },
+            placeOrder: { cn: '確認並提交訂單 (模擬)', en: 'Place Order (Simulated)' },
+            sendOrder: { cn: '發送訂單至 WhatsApp', en: 'Send Order via WhatsApp' }, // 新增按鈕文本
+            orderSuccess: { cn: '模擬 Quickbooks 提交成功！請按「發送訂單」以完成訂單。', en: 'Simulated Quickbooks submission successful! Please press "Send Order" to finalize.' },
+            qtyMustBePositive: { cn: '訂購數量必須為正整數', en: 'Order quantity must be a positive integer.' },
+            qtyExceedsStock: { cn: '訂購數量超出庫存', en: 'Order quantity exceeds current stock.' },
+            categoryFilter: { cn: '產品分類', en: 'Product Category' },
+            aboutQBLayer: { cn: 'QuickBooks 數據層模擬: 此 App 模擬了從 QuickBooks 獲取即時價格和庫存的能力。', en: 'QuickBooks Data Layer Simulation: This app simulates fetching real-time price and inventory from QuickBooks.' },
+            whatsappMessageTitle: { cn: "新訂單 (App 下單) - 恆立批發", en: "New Order (App Order) - Nice One Wholesale" },
+            whatsappMessageSubtotal: { cn: "預計總金額", en: "Est. Subtotal" },
+            whatsappMessageTotalCartons: { cn: "總箱數", en: "Total Cartons" },
+            whatsappMessageNote: { cn: "請盡快跟進此訂單並安排送貨。 (App ID:", en: "Please follow up on this order and arrange delivery. (App ID:" }
+        };
+
+        // --- UI RENDERING FUNCTIONS ---
+
+        function T(key) {
+            return langDict[key] ? langDict[key][currentLang] : key;
+        }
+
+        function switchLanguage() {
+            currentLang = currentLang === 'cn' ? 'en' : 'cn';
+            localStorage.setItem('lang', currentLang);
+            updateUILanguage();
+            renderProducts(currentFilter);
+            renderCart();
+        }
+
+        function updateUILanguage() {
+            document.querySelectorAll('[data-lang-key]').forEach(el => {
+                const key = el.getAttribute('data-lang-key');
+                el.textContent = T(key);
+            });
+            document.title = T('appTitle');
+            document.getElementById('lang-toggle').textContent = currentLang === 'cn' ? 'English' : '中文';
+        }
+
+        function getStockStatus(stock) {
+            let status = { text: '', color: '' };
+            if (stock > 50) {
+                status.text = T('inStock');
+                status.color = 'text-green-600 bg-green-100';
+            } else if (stock > 0) {
+                status.text = T('lowStock');
+                status.color = 'text-yellow-600 bg-yellow-100';
+            } else {
+                status.text = T('outOfStock');
+                status.color = 'text-red-600 bg-red-100';
+            }
+            return `<span class="px-2 py-0.5 text-xs font-semibold rounded-full ${status.color}">${status.text}</span>`;
+        }
+
+        async function renderProducts(categoryKey) {
+            currentFilter = categoryKey;
+            const container = document.getElementById('product-list');
+            const filteredProducts = PRODUCTS.filter(p =>
+                categoryKey === 'HOT_ITEMS' ? p.isHot : p.category === categoryKey
+            );
+
+            // Update category active state
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-100', 'text-gray-800');
+            });
+            document.getElementById(`cat-btn-${categoryKey}`).classList.remove('bg-gray-100', 'text-gray-800');
+            document.getElementById(`cat-btn-${categoryKey}`).classList.add('bg-blue-600', 'text-white');
+
+
+            if (filteredProducts.length === 0) {
+                container.innerHTML = `<p class="text-center text-lg text-gray-500 py-10" data-lang-key="noProduct">目前此分類沒有產品。</p>`;
+                updateUILanguage();
+                return;
+            }
+
+            // Fetch simulated real-time data for display
+            const productPromises = filteredProducts.map(p => fetchProductData(p.id));
+            const productsWithData = await Promise.all(productPromises);
+
+            container.innerHTML = productsWithData.map(p => {
+                const stock = p.stock;
+                const productName = currentLang === 'cn' ? p.cn : p.en;
+                // For English details, use the simple extraction logic
+                const productDetails = currentLang === 'cn' ? p.details : p.details.split('(')[1] ? p.details.split('(')[1].replace(')', '') : p.details;
+                const isEnquiryPrice = p.price === 9999.00;
+                
+                const priceDisplay = isEnquiryPrice 
+                    ? `<span class="text-xl font-extrabold text-red-500 mb-3">${T('perEnquiry')}</span>`
+                    : `<span class="text-xl font-extrabold text-indigo-600 mb-3">HK$${p.price.toFixed(2)}</span>`;
+
+                return `
+                    <div class="bg-white p-4 rounded-lg shadow-lg hover:shadow-xl transition duration-300 border border-gray-100 flex flex-col justify-between">
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="text-lg font-bold text-blue-800">${productName}</h3>
+                                ${isEnquiryPrice ? '' : getStockStatus(stock)}
+                            </div>
+                            <p class="text-sm text-gray-500 mb-1">${p.details}</p>
+                            <p class="text-sm text-gray-500 mb-3">${T('origin')}: ${p.origin}</p>
+                        </div>
+                        
+                        <div class="mt-4 pt-2 border-t border-gray-100">
+                            ${priceDisplay}
+                            
+                            <form onsubmit="handleAddToCart(event, '${p.id}', ${stock})" class="flex space-x-2 mt-2">
+                                <div class="flex-grow">
+                                    <label for="qty-${p.id}" class="sr-only">${T('quantity')}</label>
+                                    <input type="number" id="qty-${p.id}" min="1" value="1" placeholder="${T('quantity')}"
+                                        class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                                        style="-moz-appearance: textfield;" ${isEnquiryPrice || stock === 0 ? 'disabled' : ''}>
+                                </div>
+                                <button type="submit" 
+                                    class="flex-shrink-0 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md ${isEnquiryPrice || stock === 0 ? 'opacity-50 cursor-not-allowed' : ''}"
+                                    ${isEnquiryPrice || stock === 0 ? 'disabled' : ''}>
+                                    ${T('addToCart')}
+                                </button>
+                            </form>
+                            ${isEnquiryPrice ? '<p class="text-xs text-red-500 mt-1">此貨品需查詢報價，暫不能直接下單。</p>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            updateUILanguage();
+        }
+
+        function renderCart() {
+            const cartItemsContainer = document.getElementById('cart-items');
+            const totalCartonsEl = document.getElementById('total-cartons');
+            const totalAmountEl = document.getElementById('total-amount');
+            const placeOrderBtn = document.getElementById('place-order-btn');
+            const sendOrderBtn = document.getElementById('send-order-btn');
+
+            const itemIds = Object.keys(cart);
+            let totalCartons = 0;
+            let totalAmount = 0;
+            let containsEnquiryItem = false;
+
+            if (itemIds.length === 0) {
+                cartItemsContainer.innerHTML = `<p class="text-center text-gray-500 p-4">${T('emptyCart')}</p>`;
+                totalCartonsEl.textContent = '0';
+                totalAmountEl.textContent = 'HK$0.00';
+                placeOrderBtn.disabled = true;
+                sendOrderBtn.classList.add('hidden'); // 隱藏 WhatsApp 按鈕
+                return;
+            }
+
+            let cartHtml = itemIds.map(itemId => {
+                const item = PRODUCTS.find(p => p.id === itemId);
+                const qty = cart[itemId];
+                if (!item) return '';
+                
+                const isEnquiryPrice = item.price === 9999.00;
+                if (isEnquiryPrice) containsEnquiryItem = true;
+
+                const productName = currentLang === 'cn' ? item.cn : item.en;
+                const itemTotal = isEnquiryPrice ? 0 : item.price * qty;
+                totalCartons += qty;
+                totalAmount += itemTotal;
+
+                const priceText = isEnquiryPrice 
+                    ? `<span class="font-bold text-red-500">${T('perEnquiry')}</span>`
+                    : `<span class="font-bold text-sm text-gray-700 w-16 text-right">HK$${itemTotal.toFixed(2)}</span>`;
+
+                return `
+                    <div class="flex items-center justify-between p-3 border-b border-gray-100">
+                        <div class="flex-1 min-w-0 pr-2">
+                            <p class="font-semibold text-sm truncate">${productName}</p>
+                            <p class="text-xs text-gray-500">${isEnquiryPrice ? '' : `HK$${item.price.toFixed(2)} x `}${qty} ${T('quantity')}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            ${priceText}
+                            <button onclick="removeFromCart('${itemId}')" class="text-red-500 hover:text-red-700 text-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            cartItemsContainer.innerHTML = cartHtml;
+            totalCartonsEl.textContent = totalCartons;
+            totalAmountEl.textContent = `HK$${totalAmount.toFixed(2)}`;
+            
+            // 訂單提交邏輯：若含有查詢貨品或訂單為空，則禁用兩個按鈕
+            const disableButtons = containsEnquiryItem || (totalCartons === 0);
+            placeOrderBtn.disabled = disableButtons;
+            sendOrderBtn.disabled = disableButtons;
+            
+            // 只有在 "Place Order (Simulated)" 成功後，WhatsApp 按鈕才會被顯示
+            if (placeOrderBtn.hasAttribute('data-order-submitted')) {
+                sendOrderBtn.classList.remove('hidden');
+                placeOrderBtn.classList.add('hidden');
+            } else {
+                sendOrderBtn.classList.add('hidden');
+                placeOrderBtn.classList.remove('hidden');
+            }
+
+            // Show warning if cart contains enquiry items
+            const enquiryWarning = document.getElementById('enquiry-warning');
+            if (containsEnquiryItem) {
+                enquiryWarning.classList.remove('hidden');
+                placeOrderBtn.classList.add('hidden'); // 隱藏模擬提交按鈕
+                sendOrderBtn.classList.add('hidden'); // 隱藏 WhatsApp 按鈕
+                enquiryWarning.textContent = currentLang === 'cn' 
+                    ? '⚠️ 您的訂單包含「請向我們查詢」貨品，無法計算總金額並提交。請先移除或聯繫我們報價。'
+                    : '⚠️ Your order contains "Price Upon Enquiry" items. Total amount cannot be calculated/submitted. Please remove or contact us for a quote.';
+            } else {
+                enquiryWarning.classList.add('hidden');
+            }
+        }
+
+        // --- INTERACTION HANDLERS ---
+
+        function toggleCart() {
+            isCartOpen = !isCartOpen;
+            const cartPanel = document.getElementById('cart-panel');
+            cartPanel.classList.toggle('translate-x-full', !isCartOpen);
+            
+            // 每次打開購物車時，重置訂單狀態
+            const placeOrderBtn = document.getElementById('place-order-btn');
+            placeOrderBtn.removeAttribute('data-order-submitted');
+            
+            renderCart();
+        }
+
+        function handleAddToCart(event, productId, maxStock) {
+            event.preventDefault();
+            const qtyInput = document.getElementById(`qty-${productId}`);
+            const qty = parseInt(qtyInput.value, 10);
+            const product = PRODUCTS.find(p => p.id === productId);
+
+            if (product.price === 9999.00) {
+                showModal('此貨品需查詢報價，暫不能直接下單。 (Price Upon Enquiry)', 'error');
+                return;
+            }
+
+            if (isNaN(qty) || qty <= 0) {
+                showModal(T('qtyMustBePositive'));
+                return;
+            }
+
+            if (qty > maxStock) {
+                showModal(`${T('qtyExceedsStock')} (Max: ${maxStock} ${T('quantity')})`, 'error');
+                return;
+            }
+
+            // Add or update cart
+            cart[productId] = (cart[productId] || 0) + qty;
+            
+            // Show confirmation
+            showModal(`${qty} ${T('quantity')} [${product[currentLang]}] ${T('addToCart')}!`, 'success');
+            
+            // Reset input and update UI
+            qtyInput.value = 1;
+            renderCart();
+            updateCartButtonCount();
+            
+            // 重置訂單狀態
+            document.getElementById('place-order-btn').removeAttribute('data-order-submitted');
+        }
+
+        function removeFromCart(productId) {
+            delete cart[productId];
+            
+            // 重置訂單狀態
+            document.getElementById('place-order-btn').removeAttribute('data-order-submitted');
+            
+            renderCart();
+            updateCartButtonCount();
+        }
+
+        function updateCartButtonCount() {
+            const count = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
+            document.getElementById('cart-count').textContent = count;
+        }
+        
+        // ** 新增：生成 WhatsApp 訊息並導向 **
+        function sendOrderViaWhatsApp() {
+            // 1. 整理訂單詳情
+            const orderDetails = Object.keys(cart).map(itemId => {
+                const item = PRODUCTS.find(p => p.id === itemId);
+                const qty = cart[itemId];
+                const productName = item[currentLang];
+                const price = item.price.toFixed(2);
+                
+                // 格式: 產品名稱 (規格) - HK$價格 x 數量
+                return `${productName} (${item.details}) - HK$${price} x ${qty} 箱`;
+            }).join('\n');
+            
+            const totalCartons = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
+            let totalAmount = 0;
+            Object.keys(cart).forEach(itemId => {
+                const item = PRODUCTS.find(p => p.id === itemId);
+                if (item.price !== 9999.00) {
+                    totalAmount += item.price * cart[itemId];
+                }
+            });
+            
+            const messageTitle = T('whatsappMessageTitle');
+            const totalAmountText = T('whatsappMessageSubtotal');
+            const totalCartonsText = T('whatsappMessageTotalCartons');
+            const note = T('whatsappMessageNote');
+            
+            const whatsappMessage = 
+                `${messageTitle}\n` +
+                `============================\n` +
+                `\n` +
+                `訂單詳情 (Order Details):\n` +
+                `${orderDetails}\n` +
+                `\n` +
+                `============================\n` +
+                `${totalCartonsText}: ${totalCartons} 箱\n` +
+                `${totalAmountText}: HK$${totalAmount.toFixed(2)}\n` +
+                `============================\n` +
+                `\n` +
+                `${note} ${APP_ID})`;
+
+            // 2. 編碼訊息
+            const encodedMessage = encodeURIComponent(whatsappMessage);
+
+            // 3. 構造 WhatsApp 連結 (使用 852 區號，因為是香港公司)
+            const whatsappLink = `https://wa.me/852${WHATSAPP_NUMBER}?text=${encodedMessage}`;
+            
+            // 4. 打開連結
+            window.open(whatsappLink, '_blank');
+        }
+
+        function placeOrder() {
+            if (Object.keys(cart).length === 0) {
+                showModal(T('emptyCart'));
+                return;
+            }
+
+            // 確保沒有查詢貨品
+            const containsEnquiry = Object.keys(cart).some(id => PRODUCTS.find(p => p.id === id)?.price === 9999.00);
+            if (containsEnquiry) {
+                showModal('訂單包含需查詢報價的貨品，請先移除。', 'error');
+                return;
+            }
+
+            // SIMULATION: Quickbooks API Call & Stock Reduction
+            Object.entries(cart).forEach(([id, qty]) => {
+                const currentStock = MOCK_INVENTORY_SYSTEM.get(id);
+                if (currentStock !== undefined) {
+                    MOCK_INVENTORY_SYSTEM.set(id, Math.max(0, currentStock - qty));
+                }
+            });
+            
+            // 模擬 Quickbooks 提交成功後，將按鈕切換為 WhatsApp
+            const placeOrderBtn = document.getElementById('place-order-btn');
+            placeOrderBtn.setAttribute('data-order-submitted', 'true');
+            
+            renderCart(); // 刷新以顯示 WhatsApp 按鈕
+            renderProducts(currentFilter); // 刷新產品列表以更新庫存
+
+            showModal(T('orderSuccess'), 'success');
+        }
+
+        // --- MODAL/MESSAGE BOX UTILITY (Replaces alert()) ---
+
+        function showModal(message, type = 'info') {
+            const modal = document.getElementById('custom-modal');
+            const modalMessage = document.getElementById('modal-message');
+            const modalHeader = document.getElementById('modal-header');
+            const colorMap = {
+                'info': { bg: 'bg-blue-500', icon: 'i-info' },
+                'success': { bg: 'bg-green-500', icon: 'i-check' },
+                'error': { bg: 'bg-red-500', icon: 'i-error' }
+            };
+            
+            const { bg } = colorMap[type];
+            modalHeader.className = `p-4 text-white rounded-t-lg flex items-center justify-between ${bg}`;
+            modalMessage.textContent = message;
+            modal.classList.remove('hidden');
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // --- INITIALIZATION ---
+
+        window.onload = function() {
+            // Load language preference
+            const savedLang = localStorage.getItem('lang');
+            if (savedLang) {
+                currentLang = savedLang;
+            }
+
+            // Initialize mock inventory for ALL new products (100 cartons of everything)
+            PRODUCTS.forEach(p => {
+                if (p.price !== 9999.00) { // Only track inventory for items with set price
+                    MOCK_INVENTORY_SYSTEM.set(p.id, 100);
+                } else {
+                    MOCK_INVENTORY_SYSTEM.set(p.id, -1); // Use -1 to denote non-tradable/enquiry items
+                }
+            });
+
+            // Set up Categories in the navigation bar
+            const navContainer = document.getElementById('category-nav-links');
+            navContainer.innerHTML = Object.entries(CATEGORIES).map(([key, data]) => `
+                <a href="#${key}" id="cat-btn-${key}" onclick="renderProducts('${key}')"
+                   class="category-btn px-4 py-2 text-sm font-medium rounded-full transition duration-150 ease-in-out whitespace-nowrap bg-gray-100 text-gray-800 hover:bg-blue-500 hover:text-white">
+                    ${data.icon} <span data-lang-key="${key}">${data[currentLang]}</span>
+                </a>
+            `).join('');
+
+            updateUILanguage();
+            renderProducts('HOT_ITEMS'); // Initial load: Hot Items
+            renderCart();
+        };
+
+    </script>
+
+    <!-- Modal Placeholder -->
+    <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
+        <div class="bg-white rounded-lg shadow-2xl max-w-sm w-full transform transition-all duration-300 scale-100">
+            <div id="modal-header" class="p-4 text-white rounded-t-lg flex items-center justify-between bg-blue-500">
+                <span class="font-bold text-lg">提示 (Notice)</span>
+                <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="text-white hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <p id="modal-message" class="text-gray-700"></p>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                        確定 (OK)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- HEADER & FIXED NAVIGATION -->
+    <header class="sticky-nav bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center border-b">
+            <div class="flex items-center space-x-4">
+                <img src="https://placehold.co/40x40/3b82f6/ffffff?text=N1" alt="Nice One Logo" class="rounded-full">
+                <div>
+                    <h1 class="text-xl font-extrabold text-gray-900" data-lang-key="companyName">恆立（香港)有限公司</h1>
+                    <p class="text-sm text-gray-600" data-lang-key="orderingSystem">電子訂單系統</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <button id="lang-toggle" onclick="switchLanguage()" class="px-3 py-1 text-sm rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
+                    English
+                </button>
+                <button onclick="toggleCart()" class="relative bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-full shadow-lg transition duration-150">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    <span id="cart-count" class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">0</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Category Filter Bar (Fixed Sticky under Header) -->
+        <div class="w-full bg-gray-50 border-b border-gray-200 shadow-md">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 overflow-x-auto">
+                <div id="category-nav-links" class="flex space-x-3 pb-2">
+                    <!-- Categories rendered here by JS -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Quickbooks Simulation Notice -->
+        <div class="mb-6 p-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-lg text-sm">
+            <p class="font-bold inline" data-lang-key="aboutQBLayer"></p>
+            <span class="font-medium text-xs">(實際部署需連接 FireStore / QuickBook API)</span>
+        </div>
+
+        <!-- Product List -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-700" data-lang-key="categoryFilter">產品分類</h2>
+        </div>
+        
+        <div id="product-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <!-- Products will be rendered here by JS -->
+        </div>
+
+    </main>
+
+    <!-- FLOATING CART PANEL -->
+    <div id="cart-panel" class="fixed top-0 right-0 w-full md:w-96 h-full bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-40 flex flex-col">
+        <!-- Cart Header -->
+        <div class="p-4 bg-blue-600 text-white flex justify-between items-center shadow-md">
+            <h3 class="text-xl font-bold" data-lang-key="cartTitle">客戶訂單 (箱)</h3>
+            <button onclick="toggleCart()" class="p-1 rounded-full hover:bg-blue-700 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <!-- Enquiry Warning -->
+        <p id="enquiry-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
+
+        <!-- Cart Items -->
+        <div id="cart-items" class="flex-grow overflow-y-auto divide-y divide-gray-100">
+            <!-- Cart items rendered here by JS -->
+        </div>
+
+        <!-- Cart Footer / Summary -->
+        <div class="p-4 border-t border-gray-200 bg-gray-50 sticky bottom-0">
+            <div class="space-y-2 mb-4">
+                <div class="flex justify-between font-medium text-gray-700">
+                    <span data-lang-key="totalItems">總訂購箱數</span>:
+                    <span id="total-cartons" class="font-bold">0</span>
+                </div>
+                <div class="flex justify-between text-xl font-bold text-blue-700">
+                    <span data-lang-key="totalAmount">預計總金額</span>:
+                    <span id="total-amount">HK$0.00</span>
+                </div>
+            </div>
+            
+            <!-- 提交訂單按鈕 (模擬 Quickbooks 提交) -->
+            <button id="place-order-btn" onclick="placeOrder()" disabled
+                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                data-lang-key="placeOrder">
+                確認並提交訂單 (模擬)
+            </button>
+
+            <!-- WhatsApp 發送按鈕 (成功提交 Quickbooks 後顯示) -->
+            <button id="send-order-btn" onclick="sendOrderViaWhatsApp()" disabled
+                class="hidden w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md"
+                data-lang-key="sendOrder">
+                發送訂單至 WhatsApp
+            </button>
+        </div>
+    </div>
+    
+    <style>
+        .bg-whatsapp { background-color: #25d366; }
+        .hover:bg-whatsapp-dark:hover { background-color: #128c7e; }
+    </style>
+
+</body>
+</html>

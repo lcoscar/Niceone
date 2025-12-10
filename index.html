@@ -3,1362 +3,644 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title data-lang-key="appTitle">恆立批發訂單系統 | Nice One Wholesale Ordering</title>
+    <title>恆立批發訂單系統 | Nice One Wholesale Ordering</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Use Inter font -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7f7f7;
+            background-color: #f3f4f6;
+            color: #1f2937;
         }
-        body.authenticated {
-            visibility: visible;
-        }
-        /* Custom scrollbar styling for the cart and categories */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
         .sticky-nav {
+            position: sticky;
             top: 0;
-            z-index: 50;
+            z-index: 40;
+            backdrop-filter: blur(8px);
+            background-color: rgba(255, 255, 255, 0.95);
+        }
+        .category-scroll {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+        .category-scroll::-webkit-scrollbar {
+            display: none;
         }
     </style>
-    <!-- QR Code Library for generating QR codes client-side -->
+    <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
-<body class="text-gray-800 authenticated">
+<body>
 
-    <!-- Gemini API Key (Required for LLM features) -->
+    <!-- Gemini API Key -->
     <script>const apiKey = "";</script>
 
-    <!-- Language & Data Layer Mockup -->
+    <!-- App Logic -->
     <script>
-        // --- CUSTOMER DATA STORAGE (LOCAL MODE) ---
+        // --- CONSTANTS ---
+        const WHATSAPP_NUMBER = "65752256";
         
-        window.customerList = []; // 客戶名單已移除，保持為空
-        window.isLoggedIn = true; // 密碼功能已移除，預設為已登入
-
-        // 載入客戶資料（從 localStorage）
-        function loadCustomerData() {
-            try {
-                const savedData = localStorage.getItem('currentCustomer');
-                window.customerData = savedData ? JSON.parse(savedData) : {
-                    name: "請點擊設定按鈕填寫",
-                    customerID: "GUEST001",
-                    address: "N/A",
-                    phone: "N/A"
-                };
-            } catch (e) {
-                 window.customerData = {
-                    name: "請點擊設定按鈕填寫",
-                    customerID: "GUEST001",
-                    address: "N/A",
-                    phone: "N/A"
-                };
-            }
-            updateCustomerDisplay();
-        }
-
-        // 儲存客戶資料到 localStorage
-        function saveCustomerData(event) {
-            event.preventDefault();
-
-            const newCustomerData = {
-                name: document.getElementById('customer-name').value.trim() || "Unnamed Customer",
-                customerID: document.getElementById('customer-id').value.trim() || "CUST-UNASSIGNED",
-                address: document.getElementById('customer-address').value.trim() || "No Address Provided",
-                phone: document.getElementById('customer-phone').value.trim() || "No Phone Provided"
-            };
-            
-            if (newCustomerData.customerID === "CUST-UNASSIGNED" || !newCustomerData.name || newCustomerData.address === "No Address Provided") {
-                 window.showModal(window.T('customerInfoFillWarning'), 'error');
-                 return;
-            }
-
-            // Save to localStorage
-            localStorage.setItem('currentCustomer', JSON.stringify(newCustomerData));
-            window.customerData = newCustomerData;
-            
-            updateCustomerDisplay();
-            window.showModal(window.T('customerSaveSuccess'), 'success');
-            toggleCustomerModal(); // 關閉模態框
-        }
-
-        function setupCustomerForm() {
-            // 預填當前資料
-            document.getElementById('customer-name').value = window.customerData.name !== "請點擊設定按鈕填寫" ? window.customerData.name : '';
-            document.getElementById('customer-id').value = window.customerData.customerID !== "GUEST001" ? window.customerData.customerID : '';
-            document.getElementById('customer-address').value = window.customerData.address !== "N/A" ? window.customerData.address : '';
-            document.getElementById('customer-phone').value = window.customerData.phone !== "N/A" ? window.customerData.phone : '';
-            
-            const form = document.getElementById('customer-form');
-            if (form) {
-                form.onsubmit = saveCustomerData;
-            }
-            updateCustomerDisplay();
-        }
-        
-        function updateCustomerDisplay() {
-            const display = document.getElementById('customer-info-display');
-            if (display) {
-                display.innerHTML = `
-                    <p class="font-bold text-gray-900">${window.T('customerName')}: ${window.customerData.name}</p>
-                    <p class="text-xs text-gray-500">${window.T('customerID')}: ${window.customerData.customerID}</p>
-                `;
-            }
-            window.renderCart && window.renderCart(); 
-        }
-
-        // Function to toggle the customer modal
-        function toggleCustomerModal() {
-            document.getElementById('customer-modal').classList.toggle('hidden');
-        }
-        
-        // --- CORE APPLICATION LOGIC REMAINS BELOW ---
-        
-        const APP_ID = "1:896047165968:web:33b2ab2ef72accbd849095"; // Hardcoded App ID for consistency
-        let MOCK_INVENTORY_SYSTEM = new Map(); // Simulates stock levels in QB
+        // --- STATE MANAGEMENT ---
+        const state = {
+            cart: {}, // { productId: quantity }
+            customer: {
+                name: "",
+                id: "",
+                phone: "",
+                address: ""
+            },
+            currentCategory: 'HOT_ITEMS',
+            lastOrderId: null,
+            products: [] // Will be populated on init
+        };
 
         const CATEGORIES = {
-            HOT_ITEMS: { cn: '熱門貨品', en: 'Hot Items', icon: '🔥' },
-            PERSONAL_CARE: { cn: '個人護理', en: 'Personal Care', icon: '🧼' },
-            CANNED_MEAT: { cn: '罐頭肉類', en: 'Canned Food (Meat/Fish/Pork Cubes)', icon: '🍖' },
-            INSTANT_MIXES: { cn: '即溶飲品', en: 'Instant Mixes (Coffee/Tea/Milo)', icon: '☕' },
-            SNACKS_BISCUITS: { cn: '零食餅乾/朱古力', en: 'Snacks, Biscuits & Chocolate', icon: '🍪' },
-            DAILY_NECESSITIES: { cn: '日用品 (清潔/柔順)', en: 'Daily Necessities', icon: '🧴' },
-            DRINKS_DAIRY: { cn: '飲品及奶類 (淡奶/麥片)', en: 'Drinks, Dairy & Oatmeal', icon: '🥛' },
-            SEASONING_MISC: { cn: '調味及雜項', en: 'Seasoning & Misc.', icon: '🧂' },
+            HOT_ITEMS: { id: 'HOT_ITEMS', name: '🔥 熱門貨品' },
+            PERSONAL_CARE: { id: 'PERSONAL_CARE', name: '🧼 個人護理 (香皂/洗髮)' },
+            CANNED_MEAT: { id: 'CANNED_MEAT', name: '🍖 罐頭肉類 (午餐肉/五香)' },
+            INSTANT_MIXES: { id: 'INSTANT_MIXES', name: '☕ 即溶飲品 (咖啡/奶茶/美祿)' },
+            SNACKS: { id: 'SNACKS', name: '🍪 零食餅乾 & 朱古力' },
+            DAILY: { id: 'DAILY', name: '🧴 日用品 (洗衣/清潔)' },
+            DRINKS_DAIRY: { id: 'DRINKS_DAIRY', name: '🥛 飲品及奶類 (淡奶/麥片)' },
+            SEASONING: { id: 'SEASONING', name: '🧂 調味及雜項' },
         };
-        
-        // Helper functions used for data processing
-        function cleanPrice(priceStr) {
-            if (!priceStr || typeof priceStr !== 'string') return 0;
-            const cleaned = priceStr.replace(/[HK$,\s]/g, '').trim();
-            if (cleaned.includes('查詢') || cleaned.includes('enquiry')) {
-                return 9999.00; // Placeholder for "per enquiry" items, must be number for sorting/sum
-            }
-            return parseFloat(cleaned) || 0;
-        }
 
-        function generateId(cnName, details) {
-            // Create a simple, short ID by hashing the first few characters
-            let id = cnName.substring(0, 5) + details.substring(0, 5);
-            // Remove non-alphanumeric characters for a clean ID key
-            return id.replace(/[^a-zA-Z0-9]/g, '');
-        }
+        // --- RAW DATA IMPORT ---
+        const rawData = [
+            // 1 香皂 Soap
+            { cn: '力士香皂(混合)', en: 'Lux Soap (Mixed)', cat: 'PERSONAL_CARE', spec: '80g x6s x24扎', price: 264, origin: '印尼' },
+            { cn: '力士香皂(米色)', en: 'Lux Soap (Beige)', cat: 'PERSONAL_CARE', spec: '80g x6s x24扎', price: 270, origin: '印尼' },
+            { cn: '力士香皂(紫色)', en: 'Lux Soap (Purple)', cat: 'PERSONAL_CARE', spec: '80g x6s x24扎', price: 270, origin: '印尼' },
+            { cn: '力士香皂(藍色)', en: 'Lux Soap (Blue)', cat: 'PERSONAL_CARE', spec: '80g x6s x24扎', price: 270, origin: '印尼' },
+            { cn: '力士香皂(粉紅)', en: 'Lux Soap (Pink)', cat: 'PERSONAL_CARE', spec: '80g x6s x24扎', price: 270, origin: '印尼' },
+            { cn: '強生香皂', en: 'Johnsons Baby Soap', cat: 'PERSONAL_CARE', spec: '120g x4s x6扎', price: 162, origin: '印尼' },
+            { cn: '花王香皂', en: 'Kao White Soap', cat: 'PERSONAL_CARE', spec: '135g x3s x24扎', price: 288, origin: '日本' },
+            { cn: '滴露薄荷香皂', en: 'Dettol Cool Soap', cat: 'PERSONAL_CARE', spec: '105g x4s x36扎', price: 414, origin: '印尼' },
+            { cn: '滴露薄荷香皂(100g)', en: 'Dettol Cool Soap (100g)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露薄荷香皂(淺藍)', en: 'Dettol Cool Soap (Light Blue)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露舒膚香皂(粉紅)', en: 'Dettol Soap (Pink)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露清新香皂(黃色)', en: 'Dettol Soap (Yellow)', cat: 'PERSONAL_CARE', spec: '105g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露蘆薈牛油果香皂', en: 'Dettol Soap (Aloe)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露薰衣草香皂', en: 'Dettol Soap (Lavender)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露香橙味香皂', en: 'Dettol Soap (Orange)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露蜜瓜味香皂', en: 'Dettol Soap (Melon)', cat: 'PERSONAL_CARE', spec: '100g x6s x24扎', price: 414, origin: '印尼' },
+            { cn: '滴露原味香皂', en: 'Dettol Soap (Original)', cat: 'PERSONAL_CARE', spec: '100g x4s x36扎', price: 414, origin: '印尼' },
+            
+            // 2 香皂
+            { cn: '多芬香皂 (原味)', en: 'Dove Soap (Original)', cat: 'PERSONAL_CARE', spec: '90g x6s x8扎', price: 200, origin: '印尼' },
+            { cn: '棕欖玫瑰牛乳香皂', en: 'Palmolive Soap (Rose)', cat: 'PERSONAL_CARE', spec: '80g x3s x24扎', price: 216, origin: '泰國' },
+            { cn: '棕欖蘆薈橄欖香皂', en: 'Palmolive Soap (Aloe)', cat: 'PERSONAL_CARE', spec: '80g x3s x24扎', price: 216, origin: '泰國' },
+            { cn: '棕欖嫩白珍珠香皂', en: 'Palmolive Soap (Pearl)', cat: 'PERSONAL_CARE', spec: '80g x3s x24扎', price: 216, origin: '泰國' },
+            { cn: '棕欖香皂(大)', en: 'Palmolive Soap (L)', cat: 'PERSONAL_CARE', spec: '100g x3s x16扎', price: 160, origin: '泰國' },
+            { cn: '加信氏香皂', en: 'Cussons Soap', cat: 'PERSONAL_CARE', spec: '115g x4s x18', price: 198, origin: '印尼' },
 
-        const rawProductsData = [
-            // --- 1 香皂 Soap.csv --- (PERSONAL_CARE)
-            { cn: '力士香皂(混合)', en: 'Lux Soap (Mixed)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '264', origin: '印尼' },
-            { cn: '力士香皂(米色)', en: 'Lux Soap (Beige)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
-            { cn: '力士香皂(紫色)', en: 'Lux Soap (Purple)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
-            { cn: '力士香皂(藍色)', en: 'Lux Soap (Blue)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
-            { cn: '力士香皂(粉紅)', en: 'Lux Soap (Pink)', category: 'PERSONAL_CARE', details: '80g x6s x24扎', price: '270', origin: '印尼' },
-            { cn: '強生香皂', en: 'Johnsons Baby Soap', category: 'PERSONAL_CARE', details: '120g x4s x6扎', price: '162', origin: '印尼' },
-            { cn: '花王香皂', en: 'Kao White Soap', category: 'PERSONAL_CARE', details: '135g x3s x24扎', price: '288', origin: '日本' },
-            { cn: '滴露薄荷香皂 (105gx4)', en: 'Dettol Cool Soap. (105gx4)', category: 'PERSONAL_CARE', details: '105g x4塊 x36扎', price: '414', origin: '印尼' },
-            { cn: '滴露薄荷香皂 (100gx6)', en: 'Dettol Cool Soap. (100gx6)', category: 'PERSONAL_CARE', details: '100g x6s X24扎', price: '414', origin: '印尼' },
-            { cn: '滴露薄荷香皂 (淺藍色)', en: 'Dettol Cool Soap. (Light Blue)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露舒膚香皂 (粉紅色)', en: 'Dettol Soap (Pink)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露清新香皂 (黃色)', en: 'Dettol Soap (Yellow)', category: 'PERSONAL_CARE', details: '105g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露蘆薈牛油果香皂 (淺綠色)', en: 'Dettol Soap (Aloe Avocado)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露薰衣草香皂 (紫色)', en: 'Dettol Soap (Lavender)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露香橙味香皂 (橙色)', en: 'Dettol Soap (Orange)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露蜜瓜味香皂 (玉綠色)', en: 'Dettol Soap (Melon)', category: 'PERSONAL_CARE', details: '100g x6s x24扎', price: '414', origin: '印尼' },
-            { cn: '滴露原味香皂 (綠色)', en: 'Dettol Soap (Original)', category: 'PERSONAL_CARE', details: '100g x4s x36扎', price: '414', origin: '印尼' },
+            // 食品 Snacks
+            { cn: '洽洽香瓜子', en: 'ChaCha Sunflower Seeds', cat: 'SNACKS', spec: '260g x 20包', price: 220, origin: '中國' },
+            { cn: '麥維他消化餅', en: 'McVities Digestive', cat: 'SNACKS', spec: '400g x 2條 x 9包', price: 153, origin: '西班牙' },
+            { cn: 'MIXX 牛肉味蘇打餅', en: 'MIXX Crackers Beef', cat: 'SNACKS', spec: '280g x 16', price: 176, origin: '中國' },
+            { cn: '奧利奧夾心餅干(混合)', en: 'Oreo (Mixed)', cat: 'SNACKS', spec: '28.5g x 12包', price: 124, origin: '印尼' },
+            { cn: '黃油味蛋卷', en: 'Eggrolls (Butter)', cat: 'SNACKS', spec: '208g x 16', price: 176, origin: '中國' },
+            { cn: '利脆芝士夾心餅', en: 'Ritz Cheese', cat: 'SNACKS', spec: '27g x 9條 x 12包', price: 138, origin: '印尼' },
+            { cn: '原味蛋卷', en: 'Eggrolls (Original)', cat: 'SNACKS', spec: '208g x 16', price: 176, origin: '中國' },
+            { cn: '利脆烘烤脆片', en: 'Ritz Toasted Chips', cat: 'SNACKS', spec: '6 x 229g', price: 120, origin: '越南' },
+            { cn: '黑松露蘇打餅', en: 'Truffle Soda Crackers', cat: 'SNACKS', spec: '280g x 16', price: 176, origin: '中國' },
+            { cn: '利是-脆餅', en: 'Ritz Crackers', cat: 'SNACKS', spec: '12 x (3x100g)', price: 100, origin: '印尼' },
             
-            // --- 2香皂 Soap.csv --- (PERSONAL_CARE)
-            { cn: '多芬香皂 (原味)', en: 'Dove Soup (Original)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
-            { cn: '多芬香皂 (其他味-1)', en: 'Dove Soup (Assorted-1)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
-            { cn: '多芬香皂 (其他味-2)', en: 'Dove Soup (Assorted-2)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
-            { cn: '多芬香皂 (其他味-3)', en: 'Dove Soup (Assorted-3)', category: 'PERSONAL_CARE', details: '90g x6s x8扎', price: '200.00', origin: '印尼' },
-            { cn: '棕欖玫瑰牛乳香皂 (粉紅)', en: 'Palmolive Soup (Rose Milk)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
-            { cn: '棕欖蘆薈橄欖香皂 (綠色)', en: 'Palmolive Soup (Aloe Olive)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
-            { cn: '棕欖嫩白珍珠香皂 (紫色)', en: 'Palmolive Soup (White Pearl)', category: 'PERSONAL_CARE', details: '80g x3s x24扎', price: '216', origin: '泰國' },
-            { cn: '棕欖香皂 (粉紅-大)', en: 'Palmolive Soap (Pink-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
-            { cn: '棕欖香皂 (綠色-大)', en: 'Palmolive Soap (Green-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
-            { cn: '棕欖香皂 (紫色-大)', en: 'Palmolive Soap (Purple-Large)', category: 'PERSONAL_CARE', details: '100g x3s x16扎', price: '160', origin: '泰國' },
-            { cn: '加信氏香皂', en: 'Cussons Bathing Soap', category: 'PERSONAL_CARE', details: '115g x4s x18', price: '198.00', origin: '印尼' },
-            
-            // --- 食品.csv --- (SNACKS_BISCUITS)
-            { cn: '洽洽 香瓜子', en: 'ChaCha Sunflower Seeds', category: 'SNACKS_BISCUITS', details: '260g x 20包', price: '220', origin: '中國' },
-            { cn: '麥維他消化餅', en: 'McVitie\'s Digestive Biscuit(s)', category: 'SNACKS_BISCUITS', details: '400g x 2條 x 9包', price: '153', origin: '西班牙' },
-            { cn: 'MIXX BEEF 牛肉味蘇打餅', en: 'MIXX Crackers Beef Flavour', category: 'SNACKS_BISCUITS', details: '280g x 16', price: '176', origin: '中國' },
-            { cn: '奧利奧夾心餅干 (混合口味)', en: 'Oreo Sandwich Biscuit (Mixed)', category: 'SNACKS_BISCUITS', details: '28.5g x 12包', price: '124.00', origin: '印尼' },
-            { cn: '黃油味蛋卷', en: 'MIXX Funnyq Waffle Eggrolls (Butter)', category: 'SNACKS_BISCUITS', details: '208g X 16', price: '176', origin: '中國' },
-            { cn: '利脆芝士夾心餅', en: 'Ritz Tray Cheese', category: 'SNACKS_BISCUITS', details: '27g x 9條 x 12包', price: '138', origin: '印尼' },
-            { cn: '原味蛋卷', en: 'MIXX Funnyq Waffle Eggrolls (Original)', category: 'SNACKS_BISCUITS', details: '208g x 16', price: '176', origin: '中國' },
-            { cn: '利脆烘烤脆片-忌廉洋蔥味', en: 'RITZ Toasted Chips Sour Cream And Onion Crackers', category: 'SNACKS_BISCUITS', details: '6 x 229g', price: '120.00', origin: '越南' },
-            { cn: '黑松露蘇打餅', en: 'Black Truffle Soda Crackers', category: 'SNACKS_BISCUITS', details: '280g x 16', price: '176', origin: '中國' },
-            { cn: '利是烘烤脆片-車打芝士味', en: 'RITZ Toasted Chips Cheese', category: 'SNACKS_BISCUITS', details: '6 x 229g', price: '120.00', origin: '越南' },
-            { cn: '利是-脆餅', en: 'RITZ-Crackers', category: 'SNACKS_BISCUITS', details: '12 x (3 x100g.)', price: '100.00', origin: '印尼' },
-            
-            // --- 飲品， 奶類， 麥片，梳打粉， 粟粉.csv --- (DRINKS_DAIRY / SEASONING_MISC)
-            { cn: '寶礦力(英文版)', en: 'Pocari Sweat (English Version)', category: 'DRINKS_DAIRY', details: '500毫升 x24支', price: '95.00', origin: '印尼' },
-            { cn: '金罐紅牛', en: 'Redbull(Thailand)', category: 'DRINKS_DAIRY', details: '250毫升 x6罐 x 4排', price: '75', origin: '越南' },
-            { cn: '三花植脂淡奶', en: 'Nestlé Carnation Evaporated Milk', category: 'DRINKS_DAIRY', details: '405g x 48罐', price: '280', origin: '泰國' },
-            { cn: '三花甜奶(煉奶)', en: 'Nestlé Sweetened Milk', category: 'DRINKS_DAIRY', details: '388g x 48罐', price: '265', origin: '泰國' },
-            { cn: '雀巢鷹嘜煉奶', en: 'Nestlé Eagle Sweetened Condensed Milk', category: 'DRINKS_DAIRY', details: '350g x48罐', price: '580', origin: '中國' },
-            { cn: '克寧高鈣全家人奶粉', en: 'Klim Whole Family milk powder', category: 'DRINKS_DAIRY', details: '2.2公斤x6罐', price: '768', origin: '新西蘭' },
-            { cn: '雀巢100%全脂奶粉', en: 'NESPRAY INSTANT FULL CREAM MILK POWDER', category: 'DRINKS_DAIRY', details: '2.1公斤x6罐', price: '858', origin: '新西蘭' },
-            { cn: '桂格快熟燕麥片 (藍色)', en: 'Quaker Instant Oatmeal (Blue)', category: 'DRINKS_DAIRY', details: '800g x 12包', price: '192.00', origin: '馬來西亞' },
-            { cn: '桂格即食燕麥片 (紅色)', en: 'Quaker Instant Oatmeal (Red)', category: 'DRINKS_DAIRY', details: '800g x 12包', price: '192.00', origin: '馬來西亞' },
-            { cn: '維他麥營養麥片 (南瓜)', en: 'Vitamax Oatmeal drink (Pumpkin)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '440', origin: '中國' },
-            { cn: '維他麥營養麥片 (紅糙米)', en: 'Vitamax Oatmeal drink (Red Rice)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '420', origin: '中國' },
-            { cn: '維他麥營養麥片 (黑米)', en: 'Vitamax Oatmeal drink (Black Rice)', category: 'DRINKS_DAIRY', details: '300g x 20s x 20袋', price: '420', origin: '中國' },
-            { cn: '手 牌多用途梳打粉', en: 'ARM&HAMMER Baking Soda', category: 'SEASONING_MISC', details: '454g x 24盒', price: '192', origin: '美國' },
-            { cn: 'EUROSTAR 多用途梳打粉', en: 'Eurostar Baking Soda', category: 'SEASONING_MISC', details: '454g x 24盒', price: '144.00', origin: '中國' },
-            { cn: '家樂牌大鷹 粉', en: 'Knorr Kingsford\'s Corn Starch', category: 'SEASONING_MISC', details: '420g x 24盒', price: '219.00', origin: '中國' },
-            
-            // --- 日用品 Daily Necessities.csv --- (DAILY_NECESSITIES / PERSONAL_CARE)
-            { cn: '汰漬洗衣粉 350克', en: 'Tide Laundry Powder 350g', category: 'DAILY_NECESSITIES', details: '350克 x 36袋', price: '230', origin: '越南' },
-            { cn: '汰漬洗衣粉 690克', en: 'Tide Laundry Powder 690克', category: 'DAILY_NECESSITIES', details: '690克 x 18袋', price: '224', origin: '越南' },
-            { cn: '汰漬洗衣粉 2.25公斤', en: 'Tide Laundry Powder 2.25kg', category: 'DAILY_NECESSITIES', details: '2.25公斤 x 5袋', price: '210', origin: '越南' },
-            { cn: '汰漬洗衣粉 3.6公斤', en: 'Tide Laundry Powder 3.6kg', category: 'DAILY_NECESSITIES', details: '3.6公斤 x 3袋', price: '186', origin: '越南' },
-            { cn: '汰漬洗衣粉 8.5公斤', en: 'Tide Laundry Powder 8.5kg', category: 'DAILY_NECESSITIES', details: '8.5公斤 x 2袋', price: '270', origin: '越南' },
-            { cn: 'ARIEL 洗衣液 (補充裝)', en: 'Ariel laundry detergent refill', category: 'DAILY_NECESSITIES', details: '2公斤 x 6袋', price: '252', origin: '越南' },
-            { cn: 'DOWNY 柔順劑 (藍)', en: 'Downy Fabric Softener (Blue)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
-            { cn: 'DOWNY 柔順劑 (黑)', en: 'Downy Fabric Softener (Black)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
-            { cn: 'DOWNY 柔順劑 (紅)', en: 'Downy Fabric Softener (Red)', category: 'DAILY_NECESSITIES', details: '1.8公升 x 4支', price: '174', origin: '越南' },
-            { cn: '棕欖洗髮露 (綠色) (健康順滑)', en: 'Palmolive Shampoo (Green - Healthy Smooth)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
-            { cn: '棕欖洗髮露 (桃紅色) (深層滋養乾性)', en: 'Palmolive Shampoo (Pink - Deep Nourish)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
-            { cn: '棕欖洗髮露 (紫色) (絲滑順直)', en: 'Palmolive Shampoo (Purple - Silky Straight)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
-            { cn: '棕欖洗髮露 (藍色) (中性均衡)', en: 'Palmolive Shampoo (Blue - Neutral Balance)', category: 'PERSONAL_CARE', details: '620毫升 x 6支', price: '150', origin: '中國' },
-            { cn: '高露潔三層功效牙膏', en: 'Colgate Triple Action Toothpaste', category: 'PERSONAL_CARE', details: '(180克 x 6支 x 8套) x2', price: '568', origin: '越南' },
-            { cn: '高露潔牙刷', en: 'Colgate Toothbrush', category: 'PERSONAL_CARE', details: '12支 x 24打', price: '550', origin: '越南' },
-            { cn: '陽光洗潔精 (大)', en: 'Sunlight Dishwashing liquid (Large)', category: 'DAILY_NECESSITIES', details: '1500ml x 9支', price: '162.00', origin: '中國' },
-            { cn: '陽光洗潔精 (小)', en: 'Sunlight Dishwashing liquid (Small)', category: 'DAILY_NECESSITIES', details: '750ml X15枝裝', price: '150.00', origin: '中國' },
-            
-            // --- INSTANT COFFEE MILKTEA 1.csv --- (INSTANT_MIXES)
-            { cn: 'CAFFINO 泡沫咖啡 (經典)', en: 'CAFFINO Cappuccino Org', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
-            { cn: 'CAFFINO 泡沫咖啡 (摩卡)', en: 'CAFFINO Cappuccino Moca', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
-            { cn: 'CAFFINO 泡沫咖啡 (榛子)', en: 'CAFFINO Cappuccino Hazel nuts', category: 'INSTANT_MIXES', details: '20 g x 10s x 24袋', price: '192', origin: '印尼' },
-            { cn: 'CAFFINO 泡沫咖啡二合一 (無糖)', en: 'CAFFINO Cappuccino No added sugar (2in1)', category: 'INSTANT_MIXES', details: '13 g x 10s x 24', price: '192', origin: '印尼' },
-            { cn: 'CAFFINO拿鐵咖啡 (特濃)', en: 'CAFFINO Cappuccino Bold', category: 'INSTANT_MIXES', details: '27 g x 6s x 24袋', price: '192', origin: '印尼' },
-            { cn: 'CAFFINO泡沫咖啡 (特級)', en: 'CAFFINO Dark Cappuccino', category: 'INSTANT_MIXES', details: '25 g x 6s x 24袋', price: '192', origin: '印尼' },
-            { cn: '雀巢即溶咖啡 (200g)', en: 'NESCAFÉ instant coffee powder 200g', category: 'INSTANT_MIXES', details: '200 g x 12樽', price: '384', origin: '新加坡' },
-            { cn: '雀巢即溶咖啡 (500g)', en: 'NESCAFÉ instant coffee powder 500g', category: 'INSTANT_MIXES', details: '500 g x 6', price: '462', origin: '中國' },
-            { cn: '雀巢金牌咖啡', en: 'NESCAFÉ GOLD', category: 'INSTANT_MIXES', details: '190 g x 6s', price: '342', origin: '馬來西亞' },
-            { cn: '雀巢3合1咖啡 (47條）', en: 'NESCAFÉ 3 in 1 instant coffee (47s)', category: 'INSTANT_MIXES', details: '19 g x 47s x 18袋', price: '738', origin: '新加坡' },
-            { cn: '舊街埸3合1白咖啡 (經典)', en: 'OLD TOWN WHITE COFFEE (Classic)', category: 'INSTANT_MIXES', details: '38 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸3合1白咖啡 (特濃)', en: 'OLD TOWN WHITE COFFEE (Rich)', category: 'INSTANT_MIXES', details: '35 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸3合1白咖啡 (榛果)', en: 'OLD TOWN WHITE COFFEE (Hazelnut)', category: 'INSTANT_MIXES', details: '38 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸3合1白咖啡 (低糖)', en: 'OLD TOWN WHITE COFFEE (Less Sugar)', category: 'INSTANT_MIXES', details: '35 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸2合1白咖啡 (無糖)', en: 'OLD TOWN WHITE COFFEE (2in1 No Sugar)', category: 'INSTANT_MIXES', details: '25 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸3合1白咖啡 (蔗糖)', en: 'OLD TOWN WHITE COFFEE (Cane Sugar)', category: 'INSTANT_MIXES', details: '36 g x 15s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: '舊街埸白奶茶', en: 'OLD TOWN WHITE MILKTEA', category: 'INSTANT_MIXES', details: '35 g x 13s x 20袋', price: '600.00', origin: '馬來西亞' },
-            { cn: 'GADJAH 滴咖啡', en: 'GADJAH DRIP COFFEE', category: 'INSTANT_MIXES', details: '7.5G x 6 x 24', price: '312.00', origin: '印尼' },
-            { cn: '雀巢3合1咖啡 (30包)', en: 'NESCAFÉ 3 in 1 instant coffee (30s)', category: 'INSTANT_MIXES', details: '24包x30 x 19 g', price: '648', origin: '馬來西亞' },
-            { cn: '立頓金裝倍醇奶茶', en: 'LIPTON Milk Tea Gold', category: 'INSTANT_MIXES', details: '24包x16.5g x 12', price: '396.00', origin: '中國' },
-            
-            // --- INSTANT COFFEE MILKTEA 2.csv --- (INSTANT_MIXES)
-            { cn: '澤合怡保白咖啡2合1 (無糖)', en: 'Chek Hup Ipoh White Coffee 2 in 1 (No Sugar)', category: 'INSTANT_MIXES', details: '30g x 12s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '澤合怡保白咖啡3合1 (香濃)', en: 'Chek Hup 3 in 1 Ipoh White Coffee (Rich & Creamy)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '澤合怡保白咖啡3合1 (原味)', en: 'Chek Hup Ipoh White Coffee 3 in 1 (Original)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '澤合怡保白咖啡3合1 (少糖)', en: 'Chek Hup Ipoh White Coffee 3 in 1 (Less sugar)', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '澤合3合1奶荼', en: 'Chek Hup Ipoh Milk Tea 3 in 1', category: 'INSTANT_MIXES', details: '40g x 12s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '咖啡先生3合1 即溶咖啡', en: 'Mr. Coffee 3-in-1 Instant Coffee', category: 'INSTANT_MIXES', details: '20g x 40s x 20袋', price: '640', origin: '馬來西亞' },
-            { cn: '奶茶先生3合1即溶奶茶', en: 'Mr. Milk Tea 3-in-1 Milk tea', category: 'INSTANT_MIXES', details: '20g x 30s x 24袋', price: '825', origin: '馬來西亞' },
-            { cn: 'UCC 666 精選即溶咖啡', en: 'UCC 666 Instant Coffee', category: 'INSTANT_MIXES', details: '100G x 12支', price: '240', origin: '越南' },
-            { cn: '壩羅喜多美白咖啡 (原味)', en: 'Hicomi White Coffee (Original)', category: 'INSTANT_MIXES', details: '40g x 15s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '壩羅喜多美3合1貓山王榴槤白咖啡', en: 'Hicomi White Coffee (Durian)', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '壩羅喜多美2合1 白咖啡 (無糖)', en: 'Hicomi White Coffee 2 in 1 (No Sugar)', category: 'INSTANT_MIXES', details: '25g x 15s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '壩羅喜多美3合1 白咖啡 (特濃)', en: 'Hicomi White Coffee (Bold)', category: 'INSTANT_MIXES', details: '40g x 15s x 20袋', price: '600', origin: '馬來西亞' },
-            { cn: '亞發金牌白咖啡', en: 'Ah Huat White Coffee Medal', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
-            { cn: '亞發特濃白咖啡', en: 'Ah Huat White Coffee Rich', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
-            { cn: '亞發榛果蔗糖白咖啡', en: 'Ah Huat White Coffee Cane Sugar', category: 'INSTANT_MIXES', details: '38g x 15s x 20袋', price: '580', origin: '馬來西亞' },
-            { cn: '亞發低脂白咖啡', en: 'Ah Huat White Coffee Low fat', category: 'INSTANT_MIXES', details: '32g x 15s x 20袋', price: '580', origin: '馬來西亞' },
-            
-            // --- INSTANT COFFEE MILKTEA 3.csv --- (INSTANT_MIXES / DRINKS_DAIRY)
-            { cn: 'GOOD DAY3合1即溶咖啡 (榛子)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Hazelnut)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
-            { cn: 'GOOD DAY3合1即溶咖啡 (朱古力)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Chocolate)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
-            { cn: 'GOOD DAY3合1即溶咖啡 (莫卡)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Mocha)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
-            { cn: 'GOOD DAY3合1即溶咖啡 (原味)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Original)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
-            { cn: 'GOOD DAY3合1即溶咖啡 (雲尼拿)', en: 'GOOD DAY INSTANT FLAVOUR COFFEE (Vanilla)', category: 'INSTANT_MIXES', details: '20 g x 30s x 12袋', price: '252', origin: '印尼' },
-            { cn: '雀巢咖啡伴侶400 g', en: 'Nestlé Coffee-mate 400g', category: 'INSTANT_MIXES', details: '400 g x 15樽', price: '232.5', origin: '泰國' },
-            { cn: '雀巢咖啡伴侶450 g', en: 'Nestlé Coffee-mate 450g', category: 'INSTANT_MIXES', details: '450 g x 24袋', price: '324', origin: '泰國' },
-            { cn: '雀巢咖啡伴侶1公斤', en: 'Nestlé Coffee-mate 1kg', category: 'INSTANT_MIXES', details: '1公斤 x 12袋', price: '360', origin: '泰國' },
-            { cn: 'G7-3合1咖啡', en: 'G7 3 in 1 Instant coffee', category: 'INSTANT_MIXES', details: '10 x 50s', price: '395', origin: '越南' },
-            { cn: '雀巢美祿 (罐裝-400g)', en: 'Milo 400g in Tin', category: 'INSTANT_MIXES', details: '400 g x 24 can', price: '480', origin: '馬來西亞' },
-            { cn: '雀巢美祿 (袋裝-1kg)', en: 'Milo 1kg in Bag', category: 'INSTANT_MIXES', details: '1公斤 x 12袋', price: '474', origin: '馬來西亞' },
-            { cn: '雀巢美祿1.8公斤', en: 'Milo 1.8kg in Tin', category: 'INSTANT_MIXES', details: '1.8公斤 x 6 can', price: '468', origin: '馬來西亞' },
-            { cn: '雀巢美祿3合1 (獨立包裝)', en: 'Milo 3 in 1 sachets', category: 'INSTANT_MIXES', details: '35 g x 18s x18袋', price: '648', origin: '馬來西亞' },
-            { cn: '阿華田 400 g', en: 'Ovaltine 400g', category: 'INSTANT_MIXES', details: '400 g x 12樽', price: '264', origin: '泰國' },
-            { cn: '阿華田 1.15公斤 (上海版)', en: 'Ovaltine 1.15kg (Shanghai)', category: 'INSTANT_MIXES', details: '1.15公斤 x 6 can', price: '342', origin: '中國' },
-            { cn: '阿華田3合1 (獨立包裝)', en: 'Ovaltine 3in1 sachets', category: 'INSTANT_MIXES', details: '30 g x 20s x12袋', price: '324', origin: '中國' },
-            { cn: '好立克', en: 'Horlicks Powder', category: 'INSTANT_MIXES', details: '2公斤 x 6 can', price: '560', origin: '泰國' },
-            { cn: '好立克朱古力', en: 'Horlicks Chocolate Powder', category: 'INSTANT_MIXES', details: '400 g X24', price: '480', origin: '馬來西亞' },
-            { cn: '吉百利朱古力粉', en: 'Cadbury Drinking Chocolate', category: 'INSTANT_MIXES', details: '500 g x 6 can', price: '185', origin: '英國' },
-            
-            // --- 罐頭食品(午餐肉).csv --- (CANNED_MEAT)
-            { cn: '長城牌火腿豬肉 (198g)', en: 'Greatwall Pork and Ham 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '792', origin: '中國' },
-            { cn: '長城牌火腿豬肉 (340g)', en: 'Greatwall Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '840', origin: '中國' },
-            { cn: '樂天特級午餐肉', en: 'Lotte Luncheon Meat Premium', category: 'CANNED_MEAT', details: '340g x 24罐', price: '336.00', origin: '韓國' },
-            { cn: '韓城韓國午餐肉', en: 'Hansung Korean Luncheon Meat', category: 'CANNED_MEAT', details: '340g x 24罐', price: '288.00', origin: '韓國' },
-            { cn: '天龍牌午餐肉', en: 'Skydragon Luncheon Meat', category: 'CANNED_MEAT', details: '397g x 48罐', price: '560', origin: '中國' },
-            { cn: '天龍牌火腿豬肉 (198g)', en: 'Skydragon Pork and Ham 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '710', origin: '中國' },
-            { cn: '天龍牌火腿豬肉 (340g)', en: 'Skydragon Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '710', origin: '中國' },
-            { cn: '珍寶雞午餐肉', en: 'JUMBO Chicken Luncheon Meat', category: 'CANNED_MEAT', details: '397g x 24 x 2', price: '540', origin: '中國' },
-            { cn: '珍寶午餐肉', en: 'JUMBO Luncheon Meat (198g)', category: 'CANNED_MEAT', details: '198g x 12 x 3 x 2', price: '520', origin: '中國' },
-            { cn: '減鹽午餐肉', en: 'Spam (Less Sodium)', category: 'CANNED_MEAT', details: '8s x 340g', price: '200', origin: '美國' },
-            { cn: '天壇牌火腿豬肉 (易拉罐 198g)', en: 'HEAVEN TEMPLE Pork and Ham (EASY OPEN 198g)', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '760', origin: '中國' },
-            { cn: '天壇牌火腿豬肉 (340g)', en: 'HEAVEN TEMPLE Pork and Ham 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '840', origin: '中國' },
-            { cn: '天壇牌火腿豬肉 (397g)', en: 'HEAVEN TEMPLE Pork and Ham 397g', category: 'CANNED_MEAT', details: '(397g x 24罐) x2', price: '880', origin: '中國' },
-            { cn: '梅林牌午餐肉 (170gx3)', en: 'Marling Luncheon Meat (3x170g)', category: 'CANNED_MEAT', details: '[(3罐 x170g ) x8扎]x4', price: '704', origin: '中國' },
-            { cn: '梅林牌優質火腿午餐肉', en: 'Marling Luncheon Meat premium', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '638', origin: '中國' },
-            { cn: '梅林牌午餐肉340g', en: 'Marling Luncheon Meat 340g', category: 'CANNED_MEAT', details: '(340g x 24罐) x2', price: '480', origin: '中國' },
-            { cn: '梅林牌午餐肉198g', en: 'Marling Luncheon Meat 198g', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '560', origin: '中國' },
-            { cn: '梅林牌午餐肉397g', en: 'Marling Luncheon Meat 397g', category: 'CANNED_MEAT', details: '397g x 48罐', price: '624', origin: '中國' },
-            
-            // --- 調味料 ， 罐頭食品 (魚) 罐頭食品 (五香、回鍋).csv --- (SEASONING_MISC / CANNED_MEAT)
-            { cn: 'NUTELLA榛子醬 350 g', en: 'Nutella Hazelnut Spread 350g', category: 'SEASONING_MISC', details: '350 g x 15樽', price: '367', origin: '美國' },
-            { cn: 'NUTELLA榛子醬 750 g', en: 'Nutella Hazelnut Spread 750g', category: 'SEASONING_MISC', details: '750 g x 6樽', price: '288', origin: '美國' },
-            { cn: '頂好牌花生醬 (幼滑) 16.3盎司', en: 'Skippy Creamy Peanut Butter 16.3oz', category: 'SEASONING_MISC', details: '462 g x 12樽', price: '320', origin: '美國' },
-            { cn: '頂好牌花生醬 (粗粒) 16.3盎司', en: 'Skippy Chunky Peanut Butter 16.3oz', category: 'SEASONING_MISC', details: '462 g x 12樽', price: '320', origin: '美國' },
-            { cn: '頂好牌花生醬 (幼滑) 1360 g', en: 'Skippy Creamy Peanut Butter 1360g', category: 'SEASONING_MISC', details: '1360 g x 6樽', price: '288', origin: '美國' },
-            { cn: '頂好牌花生醬 (粗粒) 1360 g', en: 'Skippy Chunky Peanut Butter 1360g', category: 'SEASONING_MISC', details: '1360 g x 6樽', price: '288', origin: '美國' },
-            { cn: 'LIN 砂糖 2公斤', en: 'LIN Sugar 2kg', category: 'SEASONING_MISC', details: '2公斤 x 6包', price: '108', origin: '泰國' },
-            { cn: 'LIN 砂糖 5公斤', en: 'LIN Sugar 5kg', category: 'SEASONING_MISC', details: '5公斤 x 4包', price: '172', origin: '泰國' },
-            { cn: '家樂牌袋裝雞粉', en: 'Knorr Chicken Powder (Bag)', category: 'SEASONING_MISC', details: '1公斤 x 12包', price: '264', origin: '中國' },
-            { cn: '珠江橋牌豆豉鯪魚', en: 'Pearl River Bridge Fried Dace with Salted Black Beans', category: 'CANNED_MEAT', details: '(227 g x24罐) x2', price: '960.00', origin: '中國' },
-            { cn: '天龍牌豆豉鯪魚', en: 'Skydragon Fried Dace with Salted Black Beans', category: 'CANNED_MEAT', details: '(184 g x24罐) x2', price: '480', origin: '中國' },
-            { cn: '古龍牌原味黃花魚', en: 'Yellow Croaker (Original)', category: 'CANNED_MEAT', details: '120 g x 24罐', price: '240', origin: '中國' },
-            { cn: '古龍牌豆豉黃花魚', en: 'Yellow Croaker (Salted Black Beans)', category: 'CANNED_MEAT', details: '120 g x 24罐', price: '240', origin: '中國' },
-            { cn: '古龍牌丁香魚', en: 'Gulong Anchovies', category: 'CANNED_MEAT', details: '110 g x 24樽', price: '224', origin: '中國' },
-            { cn: '天龍牌五香肉丁', en: 'Sky Dragon Spiced Pork Cubes', category: 'CANNED_MEAT', details: '(142 g x48罐) x2', price: '810.00', origin: '中國' },
-            { cn: '水仙花牌五香肉丁', en: 'Narcissus Spiced Pork Cubes', category: 'CANNED_MEAT', details: '(142 g x48罐) x2', price: '1050.00', origin: '中國' },
-            { cn: '金錢-金獎豆豉鯪魚 184G', en: 'Golden Coin Fried Dace with Salted Black Beans 184G', category: 'CANNED_MEAT', details: '(184g x 24) x2', price: '384.00', origin: '中國' },
-            
-            // --- 罐頭食品（其他).csv --- (CANNED_MEAT)
-            { cn: '天龍牌咸牛肉', en: 'Skydragon Corned Beef Round', category: 'CANNED_MEAT', details: '(240 g x 24罐) x2', price: '560', origin: '中國' },
-            { cn: '梅林牌榨菜肉絲', en: 'MaLing Pork & Preserved Vegetable', category: 'CANNED_MEAT', details: '(240 g x 24罐) x2', price: '624', origin: '中國' },
-            { cn: '古龍牌香燜花生', en: 'Gulong Braised Peanuts', category: 'CANNED_MEAT', details: '170 g x 48罐', price: '240', origin: '中國' },
-            { cn: '古龍牌炒三絲', en: 'Gulong Fried Shredded Meat and Vegetables', category: 'CANNED_MEAT', details: '198 g x48罐', price: '504', origin: '中國' },
-            { cn: '梅林牌回鍋肉', en: 'Ma Ling Szechuan Sliced Pork', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '700.00', origin: '中國' },
-            { cn: '古龍牌香菇肉醬', en: 'Gulong Mushroom Meat Sauce', category: 'CANNED_MEAT', details: '180 g x 48罐', price: '408', origin: '中國' },
-            { cn: '古龍牌紅燒排骨', en: 'Gulong Braised Spare Ribs', category: 'CANNED_MEAT', details: '256g x 48罐', price: '800', origin: '中國' },
-            { cn: '古龍牌香菜心', en: 'Gulong Pickled Cabbage Hearts', category: 'CANNED_MEAT', details: '170 g x 48', price: '240', origin: '中國' },
-            { cn: '長城牌咸牛肉', en: 'Greatwall Corned Beef Round', category: 'CANNED_MEAT', details: '340g x48 罐', price: '840', origin: '中國' },
-            { cn: '古龍牌花生湯', en: 'Gulong Peanut Soup', category: 'CANNED_MEAT', details: '312 g x48罐', price: '278.4', origin: '中國' },
-            { cn: '古龍牌紅燒豬肉', en: 'Gulong Braised Pork', category: 'CANNED_MEAT', details: '256 g x48罐', price: '552', origin: '中國' },
-            { cn: '大龍牌回鍋肉', en: 'Sky Dragon Sliced Pork in Szechuan Style', category: 'CANNED_MEAT', details: '(198g x 36罐) x2', price: '684.00', origin: '中國' },
-            { cn: '古龍牌香菇豬腳腿', en: 'Gulong Mushroom Pork Knuckle', category: 'CANNED_MEAT', details: '397g x 24', price: '480', origin: '中國' },
-            
-            // --- 朱古力2.csv --- (SNACKS_BISCUITS)
-            { cn: '士力架迷你朱古力', en: 'Sneakers Minis Chocolate', category: 'SNACKS_BISCUITS', details: '(227g x24s)', price: '請向我們查詢 per enquiry', origin: '未知' },
-            { cn: '迷你黑色三角朱古力', en: 'Toblerone Mini Black Chocolate', category: 'SNACKS_BISCUITS', details: '(200g x20s)', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角牛奶朱古力 (迷你)', en: 'Toblerone Mini Milk Chocolate (Mini)', category: 'SNACKS_BISCUITS', details: '(100g x20s)x4.', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角牛奶朱古力 (分享裝)', en: 'Toblerone Milk Chocolate (Sharing)', category: 'SNACKS_BISCUITS', details: '160g分享庄 x 12', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角黑朱古力 (100g)', en: 'Toblerone Black Chocolate (100g)', category: 'SNACKS_BISCUITS', details: '100g x4 x20s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角黑巧g 力 (分享裝)', en: 'Toblerone Black Chocolate (Sharing)', category: 'SNACKS_BISCUITS', details: '160g分享庄 x 12s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '迷你黃色三角朱古', en: 'Toblerone Mini Chocolate (Yellow)', category: 'SNACKS_BISCUITS', details: '20包x200g', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角白色朱古力 (100g)', en: 'Toblerone White Chocolate (100g)', category: 'SNACKS_BISCUITS', details: '100g x20sx4.', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角白朱古力 (360g)', en: 'Toblerone White Chocolate (360g)', category: 'SNACKS_BISCUITS', details: '360 X 10s', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '三角朱古力 杏仁', en: 'Toblerone Nut Chocolate', category: 'SNACKS_BISCUITS', details: '360g x 10', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: '迷你白色三角朱古力', en: 'Toblerone Mini White Chocolate', category: 'SNACKS_BISCUITS', details: '20sx200g', price: '請向我們查詢 per enquiry', origin: '瑞士' },
-            { cn: 'Orient 朱古力 (混合)', en: 'Orient Chocolate (Mixed)', category: 'SNACKS_BISCUITS', details: '400g x 12', price: '請向我們查詢 per enquiry', origin: '土耳其' },
+            // 朱古力 Chocolate
+            { cn: '士力架迷你朱古力', en: 'Snickers Minis', cat: 'SNACKS', spec: '227g x 24s', price: 9999, origin: '未知' },
+            { cn: '三角朱古力(各款)', en: 'Toblerone (Assorted)', cat: 'SNACKS', spec: '多種規格', price: 9999, origin: '瑞士' },
+            { cn: 'Orient 朱古力(混合)', en: 'Orient Choco (Mixed)', cat: 'SNACKS', spec: '400g x 12', price: 9999, origin: '土耳其' },
+
+            // 飲品/奶類 Drinks
+            { cn: '寶礦力(英文版)', en: 'Pocari Sweat (Eng)', cat: 'DRINKS_DAIRY', spec: '500ml x 24', price: 95, origin: '印尼' },
+            { cn: '金罐紅牛', en: 'Redbull (Gold)', cat: 'DRINKS_DAIRY', spec: '250ml x 24', price: 75, origin: '越南' },
+            { cn: '三花植脂淡奶', en: 'Carnation Evap Milk', cat: 'DRINKS_DAIRY', spec: '405g x 48', price: 280, origin: '泰國' },
+            { cn: '三花甜奶(煉奶)', en: 'Nestle Sweetened Milk', cat: 'DRINKS_DAIRY', spec: '388g x 48', price: 265, origin: '泰國' },
+            { cn: '雀巢鷹嘜煉奶', en: 'Eagle Condensed Milk', cat: 'DRINKS_DAIRY', spec: '350g x 48', price: 580, origin: '中國' },
+            { cn: '克寧高鈣奶粉', en: 'Klim Milk Powder', cat: 'DRINKS_DAIRY', spec: '2.2kg x 6', price: 768, origin: '新西蘭' },
+            { cn: '雀巢全脂奶粉', en: 'Nespray Full Cream', cat: 'DRINKS_DAIRY', spec: '2.1kg x 6', price: 858, origin: '新西蘭' },
+            { cn: '桂格燕麥片', en: 'Quaker Oatmeal', cat: 'DRINKS_DAIRY', spec: '800g x 12', price: 192, origin: '馬來西亞' },
+            { cn: '維他麥營養麥片', en: 'Vitamax Oatmeal', cat: 'DRINKS_DAIRY', spec: '300g x 20s x 20', price: 440, origin: '中國' },
+
+            // 調味 Seasoning
+            { cn: '手牌梳打粉', en: 'Arm & Hammer Soda', cat: 'SEASONING', spec: '454g x 24', price: 192, origin: '美國' },
+            { cn: 'EUROSTAR梳打粉', en: 'Eurostar Soda', cat: 'SEASONING', spec: '454g x 24', price: 144, origin: '中國' },
+            { cn: '家樂牌大鷹粟粉', en: 'Knorr Corn Starch', cat: 'SEASONING', spec: '420g x 24', price: 219, origin: '中國' },
+            { cn: 'NUTELLA榛子醬', en: 'Nutella', cat: 'SEASONING', spec: '350g x 15', price: 367, origin: '美國' },
+            { cn: '頂好牌花生醬', en: 'Skippy Peanut Butter', cat: 'SEASONING', spec: '462g x 12', price: 320, origin: '美國' },
+            { cn: 'LIN 砂糖', en: 'LIN Sugar', cat: 'SEASONING', spec: '2kg x 6', price: 108, origin: '泰國' },
+            { cn: '家樂牌雞粉', en: 'Knorr Chicken Powder', cat: 'SEASONING', spec: '1kg x 12', price: 264, origin: '中國' },
+
+            // 日用品 Daily
+            { cn: '汰漬洗衣粉', en: 'Tide Powder', cat: 'DAILY', spec: '350g x 36', price: 230, origin: '越南' },
+            { cn: 'ARIEL 洗衣液', en: 'Ariel Detergent', cat: 'DAILY', spec: '2kg x 6', price: 252, origin: '越南' },
+            { cn: 'DOWNY 柔順劑', en: 'Downy Softener', cat: 'DAILY', spec: '1.8L x 4', price: 174, origin: '越南' },
+            { cn: '棕欖洗髮露', en: 'Palmolive Shampoo', cat: 'PERSONAL_CARE', spec: '620ml x 6', price: 150, origin: '中國' },
+            { cn: '高露潔牙膏', en: 'Colgate Toothpaste', cat: 'PERSONAL_CARE', spec: '180g x 6 x 16', price: 568, origin: '越南' },
+            { cn: '陽光洗潔精', en: 'Sunlight Dishwash', cat: 'DAILY', spec: '1.5L x 9', price: 162, origin: '中國' },
+
+            // 即溶飲品 Instant
+            { cn: 'CAFFINO 泡沫咖啡', en: 'Caffino Cappuccino', cat: 'INSTANT_MIXES', spec: '20g x 10s x 24', price: 192, origin: '印尼' },
+            { cn: '雀巢即溶咖啡', en: 'Nescafe Instant', cat: 'INSTANT_MIXES', spec: '200g x 12', price: 384, origin: '新加坡' },
+            { cn: '雀巢3合1咖啡', en: 'Nescafe 3in1', cat: 'INSTANT_MIXES', spec: '19g x 47s x 18', price: 738, origin: '新加坡' },
+            { cn: '舊街埸白咖啡', en: 'Old Town Coffee', cat: 'INSTANT_MIXES', spec: '38g x 15s x 20', price: 600, origin: '馬來西亞' },
+            { cn: 'GADJAH 滴咖啡', en: 'Gadjah Drip', cat: 'INSTANT_MIXES', spec: '7.5g x 6 x 24', price: 312, origin: '印尼' },
+            { cn: '立頓奶茶', en: 'Lipton Milk Tea', cat: 'INSTANT_MIXES', spec: '24 x 16.5g x 12', price: 396, origin: '中國' },
+            { cn: '澤合白咖啡', en: 'Chek Hup Coffee', cat: 'INSTANT_MIXES', spec: '40g x 12s x 20', price: 600, origin: '馬來西亞' },
+            { cn: '亞發白咖啡', en: 'Ah Huat Coffee', cat: 'INSTANT_MIXES', spec: '38g x 15s x 20', price: 580, origin: '馬來西亞' },
+            { cn: 'Good Day 咖啡', en: 'Good Day Coffee', cat: 'INSTANT_MIXES', spec: '20g x 30s x 12', price: 252, origin: '印尼' },
+            { cn: '雀巢咖啡伴侶', en: 'Coffee-mate', cat: 'INSTANT_MIXES', spec: '450g x 24', price: 324, origin: '泰國' },
+            { cn: 'G7 3合1咖啡', en: 'G7 Coffee', cat: 'INSTANT_MIXES', spec: '10 x 50s', price: 395, origin: '越南' },
+            { cn: '雀巢美祿', en: 'Milo', cat: 'INSTANT_MIXES', spec: '400g x 24', price: 480, origin: '馬來西亞' },
+            { cn: '阿華田', en: 'Ovaltine', cat: 'INSTANT_MIXES', spec: '400g x 12', price: 264, origin: '泰國' },
+            { cn: '好立克', en: 'Horlicks', cat: 'INSTANT_MIXES', spec: '2kg x 6', price: 560, origin: '泰國' },
+            { cn: '吉百利朱古力粉', en: 'Cadbury Choco', cat: 'INSTANT_MIXES', spec: '500g x 6', price: 185, origin: '英國' },
+
+            // 罐頭肉 Canned Meat
+            { cn: '長城牌火腿豬肉', en: 'Greatwall Pork Ham', cat: 'CANNED_MEAT', spec: '340g x 48', price: 840, origin: '中國' },
+            { cn: '樂天特級午餐肉', en: 'Lotte Luncheon Meat', cat: 'CANNED_MEAT', spec: '340g x 24', price: 336, origin: '韓國' },
+            { cn: '韓城韓國午餐肉', en: 'Hansung Luncheon Meat', cat: 'CANNED_MEAT', spec: '340g x 24', price: 288, origin: '韓國' },
+            { cn: '天龍牌午餐肉', en: 'Skydragon Luncheon Meat', cat: 'CANNED_MEAT', spec: '397g x 48', price: 560, origin: '中國' },
+            { cn: '珍寶午餐肉', en: 'Jumbo Luncheon Meat', cat: 'CANNED_MEAT', spec: '397g x 24 x 2', price: 540, origin: '中國' },
+            { cn: 'SPAM 減鹽午餐肉', en: 'Spam Less Sodium', cat: 'CANNED_MEAT', spec: '340g x 24', price: 600, origin: '美國' }, // Price est
+            { cn: '天壇牌火腿豬肉', en: 'Heaven Temple Pork', cat: 'CANNED_MEAT', spec: '340g x 48', price: 840, origin: '中國' },
+            { cn: '梅林牌午餐肉', en: 'Maling Luncheon Meat', cat: 'CANNED_MEAT', spec: '340g x 48', price: 480, origin: '中國' },
+            { cn: '珠江橋牌豆豉鯪魚', en: 'Pearl River Dace', cat: 'CANNED_MEAT', spec: '227g x 48', price: 960, origin: '中國' },
+            { cn: '天龍牌豆豉鯪魚', en: 'Skydragon Dace', cat: 'CANNED_MEAT', spec: '184g x 48', price: 480, origin: '中國' },
+            { cn: '古龍牌黃花魚', en: 'Gulong Croaker', cat: 'CANNED_MEAT', spec: '120g x 24', price: 240, origin: '中國' },
+            { cn: '天龍牌五香肉丁', en: 'Skydragon Pork Cubes', cat: 'CANNED_MEAT', spec: '142g x 96', price: 810, origin: '中國' },
+            { cn: '水仙花牌五香肉丁', en: 'Narcissus Pork Cubes', cat: 'CANNED_MEAT', spec: '142g x 96', price: 1050, origin: '中國' },
+            { cn: '梅林牌回鍋肉', en: 'Maling Sliced Pork', cat: 'CANNED_MEAT', spec: '198g x 72', price: 700, origin: '中國' },
+            { cn: '古龍牌香菇肉醬', en: 'Gulong Meat Sauce', cat: 'CANNED_MEAT', spec: '180g x 48', price: 408, origin: '中國' },
+            { cn: '古龍牌紅燒排骨', en: 'Gulong Spare Ribs', cat: 'CANNED_MEAT', spec: '256g x 48', price: 800, origin: '中國' }
         ];
 
-        // Process raw data into the final PRODUCTS array
-        const PRODUCTS = rawProductsData.map(p => {
-            let isHot = false;
-            // Hot Item logic
-            if (p.cn.includes('力士香皂') && p.cn.includes('(混合)')) {
-                isHot = true;
-            } else if (p.cn.includes('長城牌火腿豬肉') && p.details.includes('340g')) {
-                isHot = true;
-            } else if (p.cn.includes('高露潔三層功效牙膏')) {
-                isHot = true;
-            } else if (p.cn.includes('樂天特級午餐肉')) {
-                isHot = true;
-            } else if (p.cn.includes('CAFFINO 泡沫咖啡 (經典)')) {
-                isHot = true;
-            }
+        // --- CORE FUNCTIONS ---
 
-            const processedProduct = {
-                id: generateId(p.cn, p.details),
-                cn: p.cn,
-                en: p.en,
-                category: p.category,
-                details: p.details,
-                price: cleanPrice(p.price),
-                origin: p.origin || '未知',
-                isHot: isHot,
-            };
-
-            return processedProduct;
-        }).map((p, index, array) => {
-             // Second pass for true uniqueness check if needed, but for now we rely on the generated ID
-             // If a product has a duplicate ID after the first pass, append index
-             let count = 0;
-             const originalId = p.id;
-             while (array.filter(item => item.id === p.id).length > 1) {
-                 p.id = originalId + '_' + count++;
-             }
-             return p;
-        });
-        
-        // Expose PRODUCTS array for IIF generation
-        window.PRODUCTS = PRODUCTS; 
-        
-        // --- Quickbooks/Inventory Mock functions ---
-
-        // Function to simulate QuickBooks data fetch (Async operation)
-        function fetchProductData(productId) {
-            return new Promise(resolve => {
-                setTimeout(() => { // Simulate network latency
-                    const product = window.PRODUCTS.find(p => p.id === productId);
-                    // Use static inventory level 100, except for enquiry items (-1)
-                    const stock = MOCK_INVENTORY_SYSTEM.get(productId) || 0;
-                    resolve({ ...product, stock });
-                }, 50);
-            });
-        }
-
-        // Function to simulate QuickBooks stock check (Real-time data feed)
-        function checkInventory(productId) {
-            return MOCK_INVENTORY_SYSTEM.get(productId) || 0;
-        }
-
-        // --- GLOBAL APP STATE & UI LOGIC ---
-        let currentLang = 'cn'; // 'cn' for Traditional Chinese, 'en' for English
-        let cart = {}; // { productId: quantity_in_cartons }
-        let currentFilter = 'HOT_ITEMS';
-        let isCartOpen = false;
-        let lastOrderID = null; // Store the last order ID for QR code generation
-        
-        // ** WhatsApp 目標電話號碼 **
-        const WHATSAPP_NUMBER = "65752256";
-
-        const langDict = {
-            appTitle: { cn: '恆立批發訂單系統', en: 'Nice One Wholesale Ordering' },
-            companyName: { cn: '恆立（香港)有限公司', en: 'Nice One (HK) Ltd.' },
-            orderingSystem: { cn: '電子訂單系統', en: 'E-Ordering System' },
-            product: { cn: '產品', en: 'Product' },
-            details: { cn: '規格', en: 'Details' },
-            price: { cn: '價格(箱)', en: 'Price (Carton)' },
-            origin: { cn: '產地', en: 'Origin' },
-            stock: { cn: '庫存', en: 'Stock' },
-            quantity: { cn: '訂購數量', en: 'Qty (Carton)' },
-            addToCart: { cn: '加入訂單', en: 'Add to Order' },
-            inStock: { cn: '有貨', en: 'In Stock' },
-            lowStock: { cn: '貨量緊張', en: 'Low Stock' },
-            outOfStock: { cn: '缺貨', en: 'Out of Stock' },
-            perEnquiry: { cn: '請向我們查詢', en: 'Price Upon Enquiry' },
-            viewOrder: { cn: '查看訂單', en: 'View Order' },
-            cartTitle: { cn: '客戶訂單 (箱)', en: 'Customer Order (Cartons)' },
-            totalItems: { cn: '總訂購箱數', en: 'Total Cartons' },
-            totalAmount: { cn: '預計總金額', en: 'Est. Total Amount' },
-            emptyCart: { cn: '訂單為空，請加入貨品', en: 'Your order is empty. Please add items.' },
-            placeOrder: { cn: '確認並提交訂單 (ERP模擬)', en: 'Submit Order (ERP Sim.)' },
-            sendOrder: { cn: '發送訂單至 WhatsApp (含QR)', en: 'Send Order via WhatsApp (w/QR)' }, 
-            downloadIIF: { cn: '下載 IIF 文件 (Quickbooks)', en: 'Download IIF (Quickbooks)' }, // IIF 按鈕文本
-            orderSuccess: { cn: '訂單處理成功！請使用下方按鈕進行下一步。', en: 'Order processed successfully! Use the buttons below for next steps.' },
-            qtyMustBePositive: { cn: '訂購數量必須為正整數', en: 'Order quantity must be a positive integer.' },
-            qtyExceedsStock: { cn: '訂購數量超出庫存', en: 'Order quantity exceeds current stock.' },
-            categoryFilter: { cn: '產品分類', en: 'Product Category' },
-            aboutQBLayer: { cn: 'QuickBooks 數據層模擬: 此 App 模擬了從 QuickBooks 獲取即時價格和庫存的能力。', en: 'QuickBooks Data Layer Simulation: This app simulates fetching real-time price and inventory from QuickBooks.' },
-            whatsappMessageTitle: { cn: "新訂單 (App 下單) - 恆立批發", en: "New Order (App Order) - Nice One Wholesale" },
-            whatsappMessageSubtotal: { cn: "預計總金額", en: "Est. Subtotal" },
-            whatsappMessageTotalCartons: { cn: "總箱數", en: "Total Cartons" },
-            whatsappMessageNote: { cn: "請盡快跟進此訂單並安排送貨。", en: "Please follow up on this order and arrange delivery." },
-            customerName: { cn: "客戶名稱", en: "Customer Name" },
-            customerID: { cn: "客戶編號", en: "Customer ID" },
-            customerAddress: { cn: "送貨地址", en: "Delivery Address" },
-            customerPhone: { cn: "聯繫電話", en: "Phone Number" },
-            customerInfo: { cn: "客戶資料設定 (必填)", en: "Customer Information (Required)" },
-            customerSave: { cn: "儲存客戶資料", "en": "Save Customer Data" },
-            customerSaveSuccess: { cn: "客戶資料已安全儲存。", en: "Customer data saved securely." },
-            customerInfoFillWarning: { cn: "請確保客戶名稱, 客戶編號, 和送貨地址已填寫。", en: "Please ensure Customer Name, ID, and Address are filled." },
-            fillCustomerInfo: { cn: "請先設定客戶資料才能下單", en: "Please set customer information before placing an order." },
-            orderID: { cn: "訂單編號", en: "Order ID" },
-            passwordTitle: { cn: "存取密碼驗證", en: "Access Code Verification" },
-            passwordDesc: { cn: "請輸入存取密碼以進入系統。", en: "Please enter the access password to enter the system." },
-            passwordVerify: { cn: "驗證密碼並登入", en: "Verify Password and Log In" },
-            enquiryWarningSubmit: { cn: "⚠️ 訂單包含無庫存或需查詢報價貨品。請注意，實際庫存和價格需待確認。", en: "⚠️ Order includes out-of-stock or enquiry items. Actual stock/price must be confirmed."},
-            generateNote: { cn: "✨ 生成備註建議", en: "✨ Generate Note Suggestion" },
-            notePlaceholder: { cn: "輸入額外訂單備註 (例如: 緊急/特快件)", en: "Enter additional order notes (e.g., URGENT/Express)" },
-            noteGenerationFailed: { cn: "未能生成建議備註，請手動輸入。", en: "Failed to generate suggested note, please enter manually."}
-        };
-
-        // Expose T function globally
-        window.T = T; 
-
-        // --- LLM Gemini API Integration ---
-        async function generateOrderNote() {
-            if (!window.isLoggedIn) {
-                showModal("請先登入。", 'error');
-                return;
-            }
-            if (Object.keys(cart).length === 0) {
-                showModal(T('emptyCart'), 'error');
-                return;
-            }
-            
-            // Check if API Key is configured
-            if (!apiKey || apiKey === "") {
-                 showModal("Gemini API Key 未設置。請在程式碼中配置 apiKey。", 'error');
-                 return;
-            }
-            
-            const noteInput = document.getElementById('order-notes');
-            noteInput.value = window.T('noteGenerationFailed'); // Set initial placeholder
-
-            // 1. Summarize cart details for the prompt
-            const orderSummary = {
-                customer: window.customerData.customerID,
-                totalCartons: Object.values(cart).reduce((sum, qty) => sum + qty, 0),
-                items: Object.keys(cart).map(itemId => {
-                    const item = window.PRODUCTS.find(p => p.id === itemId);
-                    const qty = cart[itemId];
-                    const stock = checkInventory(itemId);
-                    // Categorize item status for LLM analysis
-                    const status = item.price === 9999.00 ? 'Price Enquiry' : (stock <= 50 ? 'Low Stock' : 'In Stock');
-                    return `${item.cn} (Qty: ${qty}, Status: ${status})`;
-                }).join('; ')
-            };
-
-            const systemPrompt = `Act as an expert wholesale logistics coordinator for Nice One (HK) Ltd. Your task is to analyze a sales order summary and provide a brief (max 20 Chinese characters, max 1 line) but highly relevant internal operation note or warning based on the items, customer ID, and status. Focus on risks like bulk, fragility, special pricing, or low stock. Respond only with the suggested note in Traditional Chinese.`;
-
-            const userQuery = `Analyze this order and suggest an internal operational note: Customer ID: ${orderSummary.customer}, Total Cartons: ${orderSummary.totalCartons}, Details: ${orderSummary.items}`;
-            
-            // Show loading state
-            noteInput.value = '生成中...'; 
-            
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                systemInstruction: {
-                    parts: [{ text: systemPrompt }]
-                },
-                config: {
-                    maxOutputTokens: 50,
-                }
-            };
-
+        // Initialize Application
+        function init() {
+            // Load customer data if exists
             try {
-                 const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+                const stored = localStorage.getItem('wholesale_customer');
+                if (stored) state.customer = JSON.parse(stored);
+            } catch(e) { console.error('Load Error', e); }
 
-                const result = await response.json();
-                const generatedText = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || window.T('noteGenerationFailed');
-                
-                noteInput.value = generatedText.replace(/\*/g, ''); // Clean up any markdown stars
+            // Process Products
+            state.products = rawData.map((p, idx) => ({
+                id: `P${idx + 1000}`, // Generate ID
+                ...p,
+                isHot: ['力士', '長城', '高露潔', '樂天', 'CAFFINO'].some(k => p.cn.includes(k)) // Simple hot item logic
+            }));
 
-            } catch (error) {
-                console.error("Gemini API Error:", error);
-                noteInput.value = window.T('noteGenerationFailed');
-                window.showModal("生成備註失敗，請檢查 API Key 或網路連線。", 'error');
-            }
-        }
-        
-        // --- UI RENDERING FUNCTIONS ---
-
-        function getStockStatus(stock) {
-            let status = { text: '', color: '' };
-            if (stock > 50) {
-                status.text = T('inStock');
-                status.color = 'text-green-600 bg-green-100';
-            } else if (stock >= 0) { // 允許 0 庫存顯示
-                status.text = T('lowStock');
-                status.color = 'text-yellow-600 bg-yellow-100';
-            } else {
-                status.text = T('outOfStock'); // 針對 -1 (查詢價格) 產品
-                status.color = 'text-red-600 bg-red-100';
-            }
-            return `<span class="px-2 py-0.5 text-xs font-semibold rounded-full ${status.color}">${status.text}</span>`;
+            // Render
+            updateCustomerDisplay();
+            renderCategories();
+            renderProducts();
+            renderCart();
         }
 
-        async function renderProducts(categoryKey) {
-            currentFilter = categoryKey;
-            const container = document.getElementById('product-list');
-            const filteredProducts = window.PRODUCTS.filter(p =>
-                categoryKey === 'HOT_ITEMS' ? p.isHot : p.category === categoryKey
+        // Helper: Format Price
+        function formatPrice(p) {
+            return p === 9999 ? '<span class="text-red-500 text-sm">請查詢 (Enquiry)</span>' : `HK$${p.toFixed(2)}`;
+        }
+
+        // Render Categories
+        function renderCategories() {
+            const nav = document.getElementById('category-nav');
+            nav.innerHTML = Object.values(CATEGORIES).map(c => `
+                <button onclick="setCategory('${c.id}')" 
+                    class="px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors 
+                    ${state.currentCategory === c.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100'}">
+                    ${c.name}
+                </button>
+            `).join('');
+        }
+
+        // Render Products
+        function renderProducts() {
+            const grid = document.getElementById('product-grid');
+            const targetProducts = state.products.filter(p => 
+                state.currentCategory === 'HOT_ITEMS' ? p.isHot : p.cat === state.currentCategory
             );
 
-            // Update category active state
-            document.querySelectorAll('.category-btn').forEach(btn => {
-                btn.classList.remove('bg-blue-600', 'text-white');
-                btn.classList.add('bg-gray-100', 'text-gray-800');
-            });
-            document.getElementById(`cat-btn-${categoryKey}`).classList.remove('bg-gray-100', 'text-gray-800');
-            document.getElementById(`cat-btn-${categoryKey}`).classList.add('bg-blue-600', 'text-white');
-
-
-            if (filteredProducts.length === 0) {
-                container.innerHTML = `<p class="text-center text-lg text-gray-500 py-10" data-lang-key="noProduct">目前此分類沒有產品。</p>`;
-                updateUILanguage();
+            if(targetProducts.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-400">暫無產品</div>`;
                 return;
             }
 
-            // Fetch simulated real-time data for display
-            const productPromises = filteredProducts.map(p => fetchProductData(p.id));
-            const productsWithData = await Promise.all(productPromises);
-
-            container.innerHTML = productsWithData.map(p => {
-                const stock = p.stock;
-                const productName = currentLang === 'cn' ? p.cn : p.en;
-                // For English details, use the simple extraction logic
-                const productDetails = currentLang === 'cn' ? p.details : p.details.split('(')[1] ? p.details.split('(')[1].replace(')', '') : p.details;
-                const isEnquiryPrice = p.price === 9999.00;
-                
-                const priceDisplay = isEnquiryPrice 
-                    ? `<span class="text-xl font-extrabold text-red-500 mb-3">${T('perEnquiry')}</span>`
-                    : `<span class="text-xl font-extrabold text-indigo-600 mb-3">HK$${p.price.toFixed(2)}</span>`;
-
-                // 允許下單 (remove disabled attribute)
-                const isItemDisabled = false; // 根據新需求，不再禁用
-                const inputMinQty = '1'; 
-
-                return `
-                    <div class="bg-white p-4 rounded-lg shadow-lg hover:shadow-xl transition duration-300 border border-gray-100 flex flex-col justify-between">
-                        <div>
-                            <div class="flex justify-between items-start mb-2">
-                                <h3 class="text-lg font-bold text-blue-800">${productName}</h3>
-                                ${isEnquiryPrice ? '' : getStockStatus(stock)}
-                            </div>
-                            <p class="text-sm text-gray-500 mb-1">${p.details}</p>
-                            <p class="text-sm text-gray-500 mb-3">${T('origin')}: ${p.origin}</p>
+            grid.innerHTML = targetProducts.map(p => `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex flex-col h-full hover:shadow-md transition-shadow">
+                    <div class="flex-1">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-gray-800 text-lg leading-tight mb-1">${p.cn}</h3>
+                            ${p.isHot ? '<span class="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">熱賣</span>' : ''}
                         </div>
-                        
-                        <div class="mt-4 pt-2 border-t border-gray-100">
-                            ${priceDisplay}
-                            
-                            <form onsubmit="handleAddToCart(event, '${p.id}', ${stock})" class="flex space-x-2 mt-2">
-                                <div class="flex-grow">
-                                    <label for="qty-${p.id}" class="sr-only">${T('quantity')}</label>
-                                    <input type="number" id="qty-${p.id}" min="${inputMinQty}" value="1" placeholder="${T('quantity')}"
-                                        class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
-                                        style="-moz-appearance: textfield;">
-                                </div>
-                                <button type="submit" 
-                                    class="flex-shrink-0 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
-                                    ${T('addToCart')}
-                                </button>
-                            </form>
-                            ${isEnquiryPrice ? '<p class="text-xs text-red-500 mt-1">此貨品需查詢報價，提交後需待確認價格。</p>' : ''}
+                        <p class="text-xs text-gray-500 mb-2">${p.en}</p>
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">${p.spec}</span>
+                            <span class="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">${p.origin}</span>
                         </div>
                     </div>
-                `;
-            }).join('');
-            updateUILanguage();
-        }
-
-        function renderCart() {
-            const cartItemsContainer = document.getElementById('cart-items');
-            const totalCartonsEl = document.getElementById('total-cartons');
-            const totalAmountEl = document.getElementById('total-amount');
-            const placeOrderBtn = document.getElementById('place-order-btn');
-            const orderActionsContainer = document.getElementById('order-actions'); // New container
-
-            const itemIds = Object.keys(cart);
-            let totalCartons = 0;
-            let totalAmount = 0;
-            let containsEnquiryItemOrZeroStock = false; // Check for enquiry OR zero/negative stock items
-            
-            // Determine if customer data is minimally filled
-            const isCustomerSetup = window.customerData && 
-                                   window.customerData.customerID !== "GUEST001" && 
-                                   window.customerData.name && 
-                                   window.customerData.address !== "N/A";
-
-            if (itemIds.length === 0) {
-                cartItemsContainer.innerHTML = `<p class="text-center text-gray-500 p-4">${T('emptyCart')}</p>`;
-                totalCartonsEl.textContent = '0';
-                totalAmountEl.textContent = 'HK$0.00';
-                placeOrderBtn.classList.remove('hidden');
-                orderActionsContainer.classList.add('hidden'); // Hide all post-submit actions
-                placeOrderBtn.disabled = true;
-                return;
-            }
-
-            let cartHtml = itemIds.map(itemId => {
-                const item = window.PRODUCTS.find(p => p.id === itemId);
-                const qty = cart[itemId];
-                const stock = checkInventory(itemId); // Check current stock
-                
-                if (!item) return '';
-                
-                const isEnquiryPrice = item.price === 9999.00;
-                if (isEnquiryPrice || stock <= 50) { // 庫存緊張也視為需要警告
-                    containsEnquiryItemOrZeroStock = true;
-                }
-
-                const productName = currentLang === 'cn' ? item.cn : item.en;
-                const itemTotal = isEnquiryPrice ? 0 : item.price * qty;
-                totalCartons += qty;
-                totalAmount += itemTotal;
-
-                const priceText = isEnquiryPrice 
-                    ? `<span class="font-bold text-red-500">${T('perEnquiry')}</span>`
-                    : `<span class="font-bold text-sm text-gray-700 w-16 text-right">HK$${itemTotal.toFixed(2)}</span>`;
-
-                return `
-                    <div class="flex items-center justify-between p-3 border-b border-gray-100">
-                        <div class="flex-1 min-w-0 pr-2">
-                            <p class="font-semibold text-sm truncate">${productName}</p>
-                            <p class="text-xs text-gray-500">${isEnquiryPrice ? '' : `HK$${item.price.toFixed(2)} x `}${qty} ${T('quantity')}</p>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            ${priceText}
-                            <button onclick="removeFromCart('${itemId}')" class="text-red-500 hover:text-red-700 text-sm">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            </button>
-                        </div>
+                    <div class="mt-4 pt-3 border-t border-gray-50 flex items-center justify-between">
+                        <div class="font-bold text-blue-600 text-lg">${formatPrice(p.price)}</div>
+                        <button onclick="addToCart('${p.id}')" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg shadow transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        </button>
                     </div>
-                `;
-            }).join('');
-
-            cartItemsContainer.innerHTML = cartHtml;
-            totalCartonsEl.textContent = totalCartons;
-            totalAmountEl.textContent = `HK$${totalAmount.toFixed(2)}`;
-            
-            // 訂單提交邏輯：只要有客戶資料和貨品，即允許提交
-            const disableSubmission = (totalCartons === 0) || !isCustomerSetup;
-            
-            // 顯示/隱藏提交按鈕和後續操作容器
-            if (placeOrderBtn.hasAttribute('data-order-submitted')) {
-                placeOrderBtn.classList.add('hidden');
-                orderActionsContainer.classList.remove('hidden'); // Show WhatsApp/IIF buttons
-                lastOrderID ? document.getElementById('order-qr-data').textContent = `${T('orderID')}: ${lastOrderID}` : '';
-            } else {
-                placeOrderBtn.classList.remove('hidden');
-                orderActionsContainer.classList.add('hidden'); // Hide WhatsApp/IIF buttons
-            }
-            
-            placeOrderBtn.disabled = disableSubmission;
-            
-            // 顯示/隱藏客戶資料警告
-            const customerWarning = document.getElementById('customer-info-warning');
-            if (!isCustomerSetup && totalCartons > 0) {
-                 customerWarning.classList.remove('hidden');
-                 customerWarning.textContent = T('fillCustomerInfo');
-            } else {
-                 customerWarning.classList.add('hidden');
-            }
-
-            // 顯示需要確認的警告 (針對無庫存或查詢價格的產品)
-            const enquiryWarning = document.getElementById('enquiry-warning');
-            if (containsEnquiryItemOrZeroStock && !placeOrderBtn.hasAttribute('data-order-submitted')) {
-                enquiryWarning.classList.remove('hidden');
-                enquiryWarning.textContent = T('enquiryWarningSubmit');
-            } else {
-                enquiryWarning.classList.add('hidden');
-            }
-        }
-
-        // --- INTERACTION HANDLERS ---
-
-        function toggleCustomerModal() {
-            document.getElementById('customer-modal').classList.toggle('hidden');
-        }
-
-        function toggleCart() {
-            
-            isCartOpen = !isCartOpen;
-            const cartPanel = document.getElementById('cart-panel');
-            cartPanel.classList.toggle('translate-x-full', !isCartOpen);
-            
-            // 每次打開購物車時，重置訂單狀態
-            const placeOrderBtn = document.getElementById('place-order-btn');
-            placeOrderBtn.removeAttribute('data-order-submitted');
-            lastOrderID = null;
-            
-            renderCart();
-        }
-
-        function handleAddToCart(event, productId, maxStock) {
-            
-            event.preventDefault();
-            const qtyInput = document.getElementById(`qty-${productId}`);
-            const qty = parseInt(qtyInput.value, 10);
-            const product = window.PRODUCTS.find(p => p.id === productId);
-            const isEnquiryPrice = product.price === 9999.00;
-
-
-            if (isNaN(qty) || qty <= 0) {
-                showModal(T('qtyMustBePositive'));
-                return;
-            }
-            
-            // 由於允許無庫存下單，此處僅作提示，不阻止
-            if (!isEnquiryPrice && maxStock < qty) {
-                 showModal(`您訂購的數量 (${qty}) 高於目前庫存 (${maxStock})。訂單將被記錄，但請留意實際出貨量。`, 'info');
-            }
-            
-            // 允許將需查詢報價的產品加入購物車
-            if (isEnquiryPrice && qty > 1) {
-                 showModal(`「${product.cn}」需查詢報價。請以箱為單位下單，數量將記錄為 ${qty} 箱。`, 'info');
-            }
-
-
-            // Add or update cart
-            cart[productId] = (cart[productId] || 0) + qty;
-            
-            // Show confirmation
-            showModal(`${qty} ${T('quantity')} [${product.cn}] ${T('addToCart')}!`, 'success');
-            
-            // Reset input and update UI
-            qtyInput.value = 1;
-            renderCart();
-            updateCartButtonCount();
-            
-            // 重置訂單狀態
-            document.getElementById('place-order-btn').removeAttribute('data-order-submitted');
-        }
-
-        function removeFromCart(productId) {
-            delete cart[productId];
-            
-            // 重置訂單狀態
-            document.getElementById('place-order-btn').removeAttribute('data-order-submitted');
-            lastOrderID = null;
-            
-            renderCart();
-            updateCartButtonCount();
-        }
-
-        function updateCartButtonCount() {
-            const count = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
-            document.getElementById('cart-count').textContent = count;
-        }
-        
-        // ** IIF File Generation Logic **
-        function generateIIFContent(orderId) {
-            const customer = window.customerData;
-            // IMPORTANT: Quickbooks IIF requires M/D/Y format.
-            const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-            
-            let iifContent = `!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tSHIPTOADDRESS\n`;
-            iifContent += `!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tITEM\tQTY\tRATE\tPRICE\n`;
-            iifContent += `!ENDTRNS\n`;
-
-            let totalAmount = 0;
-            let itemLines = '';
-            
-            // 1. Generate SPL lines for each item 
-            Object.keys(cart).forEach((itemId, index) => {
-                const item = window.PRODUCTS.find(p => p.id === itemId);
-                const qty = cart[itemId];
-                
-                // If price needs enquiry, use 0.01 as placeholder to avoid QB error, and note in MEMO.
-                const price = item.price === 9999.00 ? 0.01 : item.price;
-                const lineTotal = price * qty;
-                totalAmount += lineTotal;
-                
-                let memo = item.cn + " (" + item.details + ")";
-                if (item.price === 9999.00) {
-                    memo += " - PRICE PENDING CONFIRMATION";
-                }
-                
-                // Account for Sales: 'Sales' (Must match your QB Chart of Accounts)
-                itemLines += `SPL\t\tINVOICE\t${today}\tSales\t${customer.customerID}\t${lineTotal.toFixed(2)}\t${orderId}\t${memo}\t${item.id}\t${qty}\t${price.toFixed(2)}\t${lineTotal.toFixed(2)}\n`;
-            });
-            
-            // 2. Generate TRNS line (Invoice Header)
-            // Assuming "Accounts Receivable" as the account for the invoice total
-            const formattedAddress = customer.address.replace(/\n/g, ' '); // IIF requires single line for address field
-            const orderNotes = document.getElementById('order-notes').value.trim();
-            
-            let transactionMemo = `Wholesale Order for ${customer.name}`;
-            if (orderNotes) {
-                transactionMemo += ` | Note: ${orderNotes}`;
-            }
-
-            iifContent += `TRNS\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${totalAmount.toFixed(2)}\t${orderId}\t${transactionMemo}\t${formattedAddress}\n`;
-            
-            // 3. Append item SPL lines
-            iifContent += itemLines;
-            
-            // 4. Generate final TRNS closing SPL line for A/R balance
-            // This line balances the transaction against A/R
-            iifContent += `SPL\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${(-totalAmount).toFixed(2)}\t${orderId}\tInvoice Total Balance\n`;
-            
-            iifContent += `ENDTRNS\n`;
-
-            return iifContent;
-        }
-
-        function downloadIIF() {
-            if (!lastOrderID) {
-                showModal("請先提交訂單。 (Please submit the order first.)", 'error');
-                return;
-            }
-            
-            const iifContent = generateIIFContent(lastOrderID);
-            const blob = new Blob([iifContent], { type: 'text/plain;charset=utf-8' });
-            
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `NICEONE_ORDER_${lastOrderID}_${window.customerData.customerID}.iif`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            showModal("IIF 文件已下載！請導入 Quickbooks Desktop。", 'info');
-        }
-
-        // ** WhatsApp Message and QR Code Logic **
-        function sendOrderViaWhatsApp() {
-            if (!lastOrderID) {
-                 showModal("請先提交訂單。 (Please submit the order first.)", 'error');
-                return;
-            }
-            
-            // 1. 整理訂單詳情
-            const orderDetails = Object.keys(cart).map(itemId => {
-                const item = window.PRODUCTS.find(p => p.id === itemId);
-                const qty = cart[itemId];
-                const productName = item[currentLang];
-                
-                const isEnquiry = item.price === 9999.00;
-                const priceText = isEnquiry ? T('perEnquiry') : `HK$${item.price.toFixed(2)}`;
-                
-                // 格式: 產品名稱 (規格) - 價格 x 數量
-                return `${productName} (${item.details}) - ${priceText} x ${qty} 箱`;
-            }).join('\n');
-            
-            const totalCartons = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
-            let totalAmount = 0;
-            Object.keys(cart).forEach(itemId => {
-                const item = window.PRODUCTS.find(p => p.id === itemId);
-                if (item.price !== 9999.00) {
-                    totalAmount += item.price * cart[itemId];
-                }
-            });
-            
-            const messageTitle = T('whatsappMessageTitle');
-            const totalAmountText = T('whatsappMessageSubtotal');
-            const totalCartonsText = T('whatsappMessageTotalCartons');
-            const note = T('whatsappMessageNote');
-            
-            const qrCodeContent = `NICEONE_ORDER_${lastOrderID}`;
-            const orderNotes = document.getElementById('order-notes').value.trim();
-            const noteLine = orderNotes ? `內部備註: ${orderNotes}\n` : '';
-
-            const whatsappMessage = 
-                `${messageTitle}\n` +
-                `============================\n` +
-                `客戶名稱: ${window.customerData.name}\n` +
-                `客戶編號: ${window.customerData.customerID}\n` +
-                `聯繫電話: ${window.customerData.phone}\n` +
-                `送貨地址: ${window.customerData.address}\n` +
-                `${T('orderID')}: ${lastOrderID}\n` +
-                `\n` +
-                `訂單詳情 (Order Details):\n` +
-                `${orderDetails}\n` +
-                `\n` +
-                `============================\n` +
-                `${totalCartonsText}: ${totalCartons} 箱\n` +
-                `${totalAmountText}: HK$${totalAmount.toFixed(2)} (不包含需查詢報價貨品)\n` +
-                `============================\n` +
-                noteLine +
-                `${note}\n` +
-                `倉庫貼紙二維碼內容:\n${qrCodeContent}`; // Mention the QR code content clearly
-
-            // 2. 編碼訊息
-            const encodedMessage = encodeURIComponent(whatsappMessage);
-
-            // 3. 構造 WhatsApp 連結 (使用 852 區號)
-            const whatsappLink = `https://wa.me/852${WHATSAPP_NUMBER}?text=${encodedMessage}`;
-            
-            // 4. 打開連結
-            window.open(whatsappLink, '_blank');
-        }
-
-        // ** Main Order Submission **
-        function placeOrder() {
-            if (Object.keys(cart).length === 0) {
-                showModal(T('emptyCart'));
-                return;
-            }
-            
-            // 最終檢查客戶資料是否填寫
-            if (window.customerData.customerID === "GUEST001" || !window.customerData.name || window.customerData.address === "N/A") {
-                 showModal(T('fillCustomerInfo'), 'error');
-                 return;
-            }
-            
-            // SIMULATION: Generate unique Order ID
-            const orderId = `SO-${Date.now()}`;
-            lastOrderID = orderId;
-            
-            // SIMULATION: Quickbooks API Call & Stock Reduction
-            Object.entries(cart).forEach(([id, qty]) => {
-                const currentStock = MOCK_INVENTORY_SYSTEM.get(id);
-                if (currentStock !== undefined) {
-                    MOCK_INVENTORY_SYSTEM.set(id, Math.max(0, currentStock - qty));
-                }
-            });
-            
-            // 模擬 Quickbooks 提交成功後，將按鈕切換為後續操作
-            const placeOrderBtn = document.getElementById('place-order-btn');
-            placeOrderBtn.setAttribute('data-order-submitted', 'true');
-            
-            renderCart(); // 刷新以顯示後續操作按鈕
-
-            // Show success modal with QR code generation
-            showSuccessModalWithQR(orderId);
-        }
-        
-        // Function to show QR code after successful submission
-        function showSuccessModalWithQR(orderId) {
-            const modal = document.getElementById('custom-modal-qr');
-            const modalMessage = document.getElementById('modal-message-qr');
-            
-            modalMessage.innerHTML = `${T('orderSuccess')} <br> ${T('orderID')}: 請注意，由於訂單中包含「需查詢報價」或「庫存不足」貨品，最終金額和出貨量需等待客服確認。`;
-
-            // Clear previous QR code and generate new one
-            const qrCodeContainer = document.getElementById('qrcode-container');
-            qrCodeContainer.innerHTML = '';
-            
-            // Generate QR Code with Order ID (NICEONE_ORDER_XXX) for warehouse stickering
-            new QRCode(qrCodeContainer, {
-                text: `NICEONE_ORDER_${orderId}`,
-                width: 128,
-                height: 128,
-                colorDark : "#000000",
-                colorLight : "#ffffff",
-                correctLevel : QRCode.CorrectLevel.H
-            });
-            
-            modal.classList.remove('hidden');
-        }
-        
-        // --- MODAL/MESSAGE BOX UTILITY (Replaces alert()) ---
-
-        function showModal(message, type = 'info') {
-            const modal = document.getElementById('custom-modal');
-            const modalMessage = document.getElementById('modal-message');
-            const modalHeader = document.getElementById('modal-header');
-            const colorMap = {
-                'info': { bg: 'bg-blue-500', icon: 'i-info' },
-                'success': { bg: 'bg-green-500', icon: 'i-check' },
-                'error': { bg: 'bg-red-500', icon: 'i-error' }
-            };
-            
-            const { bg } = colorMap[type];
-            modalHeader.className = `p-4 text-white rounded-t-lg flex items-center justify-between ${bg}`;
-            modalMessage.textContent = message;
-            modal.classList.remove('hidden');
-
-            // Auto-hide after 3 seconds
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 3000);
-        }
-        
-        // --- INITIALIZATION ---
-
-        window.onload = function() {
-            // 由於密碼功能已移除，我們直接設置為已登入
-            window.isLoggedIn = true;
-            document.body.classList.add('authenticated');
-            
-            // Load language preference
-            const savedLang = localStorage.getItem('lang');
-            if (savedLang) {
-                currentLang = savedLang;
-            }
-
-            // Initialize mock inventory for ALL new products (100 cartons of everything)
-            window.PRODUCTS.forEach(p => {
-                if (p.price !== 9999.00) { // Only track inventory for items with set price
-                    MOCK_INVENTORY_SYSTEM.set(p.id, 100);
-                } else {
-                    MOCK_INVENTORY_SYSTEM.set(p.id, -1); // Use -1 to denote non-tradable/enquiry items
-                }
-            });
-
-            // Set up Categories in the navigation bar
-            const navContainer = document.getElementById('category-nav-links');
-            navContainer.innerHTML = Object.entries(CATEGORIES).map(([key, data]) => `
-                <a href="#${key}" id="cat-btn-${key}" onclick="renderProducts('${key}')"
-                   class="category-btn px-4 py-2 text-sm font-medium rounded-full transition duration-150 ease-in-out whitespace-nowrap bg-gray-100 text-gray-800 hover:bg-blue-500 hover:text-white">
-                    ${data.icon} <span data-lang-key="${key}">${data[currentLang]}</span>
-                </a>
+                </div>
             `).join('');
+        }
 
-            updateUILanguage();
-            renderProducts('HOT_ITEMS'); // Initial load: Hot Items
-            loadCustomerData(); // Load local customer data
-            window.setupCustomerForm(); // Setup customer form after global T is available
+        // Switch Category
+        window.setCategory = (id) => {
+            state.currentCategory = id;
+            renderCategories();
+            renderProducts();
+            window.scrollTo({top: 0, behavior: 'smooth'});
         };
 
-        // Expose critical functions globally
-        window.sendOrderViaWhatsApp = sendOrderViaWhatsApp;
-        window.placeOrder = placeOrder;
-        window.downloadIIF = downloadIIF;
-        window.showModal = showModal;
-        window.renderCart = renderCart; // Expose renderCart
-        window.toggleCustomerModal = toggleCustomerModal;
-        window.setupCustomerForm = setupCustomerForm;
-        window.saveCustomerData = saveCustomerData;
-        window.generateOrderNote = generateOrderNote; // Expose LLM function
+        // Cart Actions
+        window.addToCart = (id) => {
+            state.cart[id] = (state.cart[id] || 0) + 1;
+            showToast('已加入購物車');
+            renderCart();
+        };
+
+        window.updateQty = (id, change) => {
+            if (state.cart[id] + change <= 0) {
+                delete state.cart[id];
+            } else {
+                state.cart[id] += change;
+            }
+            renderCart();
+        };
+
+        window.toggleCart = () => {
+            const panel = document.getElementById('cart-panel');
+            panel.classList.toggle('translate-x-full');
+            // Hide post-submit actions when reopening
+            document.getElementById('post-submit-actions').classList.add('hidden');
+            document.getElementById('cart-footer').classList.remove('hidden');
+        };
+
+        // Render Cart
+        function renderCart() {
+            const container = document.getElementById('cart-items');
+            const ids = Object.keys(state.cart);
+            let total = 0;
+            let count = 0;
+            let hasEnquiry = false;
+
+            document.getElementById('cart-count').innerText = ids.reduce((a,b) => a + state.cart[b], 0);
+
+            if (ids.length === 0) {
+                container.innerHTML = `<div class="h-full flex flex-col items-center justify-center text-gray-400">
+                    <svg class="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    <p>購物車是空的</p>
+                </div>`;
+                document.getElementById('cart-total-price').innerText = 'HK$0.00';
+                return;
+            }
+
+            container.innerHTML = ids.map(id => {
+                const p = state.products.find(x => x.id === id);
+                const qty = state.cart[id];
+                const subtotal = p.price === 9999 ? 0 : p.price * qty;
+                
+                if(p.price === 9999) hasEnquiry = true;
+                else total += subtotal;
+                count += qty;
+
+                return `
+                    <div class="bg-white p-3 rounded-lg border border-gray-100 mb-2">
+                        <div class="flex justify-between mb-1">
+                            <span class="font-medium text-gray-800 text-sm line-clamp-1">${p.cn}</span>
+                            <span class="font-bold text-sm ${p.price === 9999 ? 'text-red-500' : 'text-gray-900'}">
+                                ${p.price === 9999 ? '查詢' : 'HK$'+subtotal.toFixed(0)}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs text-gray-500">
+                            <span>${p.spec}</span>
+                            <div class="flex items-center gap-3 bg-gray-50 rounded px-2 py-1">
+                                <button onclick="updateQty('${id}', -1)" class="hover:text-blue-600">-</button>
+                                <span class="font-bold w-4 text-center">${qty}</span>
+                                <button onclick="updateQty('${id}', 1)" class="hover:text-blue-600">+</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('cart-total-items').innerText = count;
+            document.getElementById('cart-total-price').innerText = `HK$${total.toFixed(2)}` + (hasEnquiry ? ' + 詢價' : '');
+        }
+
+        // --- CUSTOMER FORM LOGIC ---
+        window.openCustomerModal = () => {
+            const modal = document.getElementById('customer-modal');
+            modal.classList.remove('hidden');
+            // Fill form
+            document.getElementById('cust-name').value = state.customer.name;
+            document.getElementById('cust-id').value = state.customer.id;
+            document.getElementById('cust-phone').value = state.customer.phone;
+            document.getElementById('cust-address').value = state.customer.address;
+        };
+
+        window.closeCustomerModal = () => {
+            document.getElementById('customer-modal').classList.add('hidden');
+        };
+
+        window.saveCustomer = (e) => {
+            e.preventDefault();
+            state.customer = {
+                name: document.getElementById('cust-name').value,
+                id: document.getElementById('cust-id').value,
+                phone: document.getElementById('cust-phone').value,
+                address: document.getElementById('cust-address').value,
+            };
+            localStorage.setItem('wholesale_customer', JSON.stringify(state.customer));
+            updateCustomerDisplay();
+            closeCustomerModal();
+            showToast('客戶資料已儲存');
+        };
+
+        function updateCustomerDisplay() {
+            const el = document.getElementById('customer-label');
+            if (state.customer.name) {
+                el.innerHTML = `<span class="font-bold">${state.customer.name}</span> <span class="text-xs opacity-75">(${state.customer.id})</span>`;
+            } else {
+                el.innerHTML = `<span>設定客戶資料</span>`;
+            }
+        }
+
+        // --- SUBMISSION & FEATURES ---
+        
+        window.prepareOrder = () => {
+            // Check cart
+            if (Object.keys(state.cart).length === 0) {
+                alert("購物車是空的");
+                return;
+            }
+            // Check customer
+            if (!state.customer.name || !state.customer.id) {
+                alert("請先填寫客戶資料 (點擊左上角按鈕)");
+                openCustomerModal();
+                return;
+            }
+
+            // "Simulate" submission
+            state.lastOrderId = `SO-${Date.now().toString().slice(-6)}`;
+            
+            // Show post-submit UI
+            document.getElementById('cart-footer').classList.add('hidden');
+            const actions = document.getElementById('post-submit-actions');
+            actions.classList.remove('hidden');
+            
+            // Generate QR
+            document.getElementById('qrcode').innerHTML = '';
+            new QRCode(document.getElementById('qrcode'), {
+                text: `NICEONE_${state.lastOrderId}`,
+                width: 100,
+                height: 100
+            });
+            
+            document.getElementById('success-order-id').innerText = state.lastOrderId;
+        };
+
+        window.sendWhatsApp = () => {
+            const lines = [];
+            lines.push(`*新訂單 New Order*`);
+            lines.push(`Order ID: ${state.lastOrderId}`);
+            lines.push(`客戶: ${state.customer.name} (${state.customer.id})`);
+            lines.push(`電話: ${state.customer.phone}`);
+            lines.push(`地址: ${state.customer.address}`);
+            lines.push(`----------------`);
+            
+            let total = 0;
+            Object.keys(state.cart).forEach(id => {
+                const p = state.products.find(x => x.id === id);
+                const qty = state.cart[id];
+                const sub = p.price === 9999 ? "詢價" : p.price * qty;
+                if (typeof sub === 'number') total += sub;
+                lines.push(`${p.cn} x ${qty}箱 = ${typeof sub === 'number' ? '$'+sub : sub}`);
+            });
+            
+            lines.push(`----------------`);
+            lines.push(`*預計總額: HK$${total.toFixed(2)}*`);
+            
+            const note = document.getElementById('ai-note-result').innerText;
+            if (note) lines.push(`備註: ${note}`);
+
+            const url = `https://wa.me/852${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines.join('\n'))}`;
+            window.open(url, '_blank');
+        };
+
+        window.downloadIIF = () => {
+            const date = new Date().toLocaleDateString('en-US'); // MM/DD/YYYY
+            let content = `!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\n`;
+            content += `!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tITEM\tQTY\tRATE\tPRICE\n`;
+            
+            let total = 0;
+            let splRows = '';
+            
+            Object.keys(state.cart).forEach(id => {
+                const p = state.products.find(x => x.id === id);
+                const qty = state.cart[id];
+                const rate = p.price === 9999 ? 0 : p.price;
+                const amt = rate * qty;
+                total += amt;
+                
+                splRows += `SPL\t\tINVOICE\t${date}\tSales\t\t${-amt}\t${state.lastOrderId}\t${p.cn}\t${p.id}\t${-qty}\t${rate}\t${amt}\n`;
+            });
+
+            content += `TRNS\t\tINVOICE\t${date}\tAccounts Receivable\t${state.customer.id}\t${total}\t${state.lastOrderId}\tSales Order\n`;
+            content += splRows;
+            content += `ENDTRNS\n`;
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Inv_${state.lastOrderId}.iif`;
+            a.click();
+        };
+
+        // Gemini AI Logic
+        window.askGemini = async () => {
+            const btn = document.getElementById('ai-btn');
+            const result = document.getElementById('ai-note-result');
+            
+            if (Object.keys(state.cart).length === 0) return;
+            if (!apiKey) {
+                result.innerText = "API Key 未設定";
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "分析中...";
+            
+            // Construct prompt
+            const items = Object.keys(state.cart).map(id => state.products.find(x => x.id === id).cn).join(', ');
+            const prompt = `分析此批發訂單並給出簡短物流備註(例如：易碎、重貨、需冷藏)。產品：${items}。請只回覆備註內容，繁體中文。`;
+            
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const data = await response.json();
+                result.innerText = data.candidates[0].content.parts[0].text;
+            } catch (e) {
+                result.innerText = "AI 分析失敗";
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "AI 智能備註";
+            }
+        };
+
+        // Toast Notification
+        function showToast(msg) {
+            const el = document.createElement('div');
+            el.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 animate-bounce';
+            el.innerText = msg;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 2000);
+        }
+
+        // Init
+        window.onload = init;
 
     </script>
-    
-    <!-- Modal Placeholder for simple messages -->
-    <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
-        <div class="bg-white rounded-lg shadow-2xl max-w-sm w-full transform transition-all duration-300 scale-100">
-            <div id="modal-header" class="p-4 text-white rounded-t-lg flex items-center justify-between bg-blue-500">
-                <span class="font-bold text-lg">提示 (Notice)</span>
-                <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="text-white hover:text-gray-200">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="p-6">
-                <p id="modal-message" class="text-gray-700"></p>
-                <div class="mt-4 flex justify-end">
-                    <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
-                        確定 (OK)
+
+    <!-- HEADER -->
+    <header class="sticky-nav border-b border-gray-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <!-- Left: Logo & Customer -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">N1</div>
+                <div>
+                    <h1 class="font-bold text-gray-800 text-lg leading-none">恆立(香港)</h1>
+                    <button onclick="openCustomerModal()" id="customer-label" class="text-xs text-blue-600 hover:underline flex items-center mt-1">
+                        設定客戶資料
                     </button>
                 </div>
+            </div>
+
+            <!-- Right: Cart Trigger -->
+            <button onclick="toggleCart()" class="relative p-2 text-gray-600 hover:text-blue-600">
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                <span id="cart-count" class="absolute top-0 right-0 bg-red-500 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">0</span>
+            </button>
+        </div>
+
+        <!-- Category Nav -->
+        <div class="max-w-7xl mx-auto px-4 py-2 overflow-x-auto category-scroll flex gap-2" id="category-nav">
+            <!-- Injected by JS -->
+        </div>
+    </header>
+
+    <!-- MAIN GRID -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <!-- Injected by JS -->
+        </div>
+    </main>
+
+    <!-- CART SIDEBAR -->
+    <div id="cart-panel" class="fixed inset-y-0 right-0 w-full sm:w-96 bg-white shadow-2xl transform translate-x-full transition-transform duration-300 z-50 flex flex-col">
+        <!-- Header -->
+        <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+            <h2 class="font-bold text-lg text-gray-800">訂單明細</h2>
+            <button onclick="toggleCart()" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <!-- Scrollable Items -->
+        <div class="flex-1 overflow-y-auto p-4" id="cart-items">
+            <!-- Injected by JS -->
+        </div>
+
+        <!-- AI Note Section -->
+        <div class="px-4 py-2 bg-purple-50 border-t border-purple-100">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-xs font-bold text-purple-800">AI 訂單分析</span>
+                <button id="ai-btn" onclick="askGemini()" class="text-xs bg-purple-200 hover:bg-purple-300 text-purple-800 px-2 py-1 rounded transition">生成建議</button>
+            </div>
+            <p id="ai-note-result" class="text-xs text-gray-600 italic min-h-[1.5em]">...</p>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="p-4 border-t border-gray-200 bg-white">
+            <div class="flex justify-between items-end mb-4">
+                <span class="text-gray-500 text-sm">共 <span id="cart-total-items">0</span> 件</span>
+                <span class="text-2xl font-bold text-blue-600" id="cart-total-price">HK$0.00</span>
+            </div>
+
+            <!-- Initial Submit -->
+            <div id="cart-footer">
+                <button onclick="prepareOrder()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95">
+                    確認並提交訂單
+                </button>
+            </div>
+
+            <!-- Post-Submit Actions (Hidden by default) -->
+            <div id="post-submit-actions" class="hidden space-y-3">
+                <div class="bg-green-50 rounded-lg p-3 text-center mb-2 border border-green-100">
+                    <p class="text-green-800 font-bold text-sm">✅ 訂單已生成: <span id="success-order-id"></span></p>
+                    <div id="qrcode" class="flex justify-center my-2 mix-blend-multiply"></div>
+                    <p class="text-xs text-green-600">請截圖保存 QR Code 供倉庫掃描</p>
+                </div>
+                
+                <button onclick="sendWhatsApp()" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl shadow flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.017-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                    發送 WhatsApp
+                </button>
+                
+                <button onclick="downloadIIF()" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 rounded-xl shadow">
+                    下載 Quickbooks IIF
+                </button>
             </div>
         </div>
     </div>
-    
-    <!-- Modal Placeholder for Order Success/QR Code -->
-    <div id="custom-modal-qr" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
-        <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100">
-            <div class="p-4 bg-green-500 text-white rounded-t-lg flex items-center justify-between">
-                <span class="font-bold text-lg">✅ 訂單已處理成功 (Order Processed)</span>
-                <button onclick="document.getElementById('custom-modal-qr').classList.add('hidden'); cart = {}; updateCartButtonCount(); renderCart();" class="text-white hover:text-gray-200">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="p-6 text-center">
-                <p id="modal-message-qr" class="text-gray-700 text-lg mb-4 font-semibold"></p>
-                
-                <p class="text-sm text-gray-500 mb-2">倉庫掃描貼紙 (Warehouse Sticker QR Code)</p>
-                <div id="qrcode-container" class="mx-auto w-32 h-32 border-4 border-gray-200 rounded-lg mb-4">
-                    <!-- QR Code will be drawn here -->
-                </div>
 
-                <div class="flex flex-col space-y-2">
-                    <button onclick="downloadIIF(); document.getElementById('custom-modal-qr').classList.add('hidden');" 
-                        class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                        <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
-                    </button>
-                    <button onclick="sendOrderViaWhatsApp(); document.getElementById('custom-modal-qr').classList.add('hidden');"
-                        class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                        <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
-                    </button>
-                </div>
-                <p class="mt-4 text-xs text-gray-400">請完成以上操作後，重新開啟購物車以清空訂單。</p>
+    <!-- CUSTOMER MODAL -->
+    <div id="customer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div class="bg-blue-600 p-4 text-white flex justify-between items-center">
+                <h3 class="font-bold text-lg">設定客戶資料 (必填)</h3>
+                <button onclick="closeCustomerModal()" class="text-blue-100 hover:text-white text-2xl">&times;</button>
             </div>
-        </div>
-    </div>
-    
-    <!-- Modal Placeholder for Customer Info Input -->
-    <div id="customer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-center justify-center">
-        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full m-4 transform transition-all duration-300">
-            <div class="p-4 bg-blue-600 text-white rounded-t-xl flex justify-between items-center">
-                <h3 class="text-xl font-bold" data-lang-key="customerInfo">客戶資料設定 (必填)</h3>
-                <button onclick="toggleCustomerModal()" class="p-1 rounded-full hover:bg-blue-700 transition">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-
-            <form id="customer-form" class="p-6 space-y-4">
-                <div class="space-y-1 relative">
-                    <label for="customer-name" class="block text-sm font-medium text-gray-700" data-lang-key="customerName">客戶名稱</label>
-                    <input type="text" id="customer-name" name="customer-name" required 
-                        placeholder="恆立有限公司"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+            <form onsubmit="saveCustomer(event)" class="p-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">客戶名稱</label>
+                    <input type="text" id="cust-name" required class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
-                 <div class="space-y-1">
-                    <label for="customer-id" class="block text-sm font-medium text-gray-700" data-lang-key="customerID">客戶編號 (Quickbooks/ERP ID)</label>
-                    <input type="text" id="customer-id" name="customer-id" required
-                        placeholder="CUST-001"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">客戶編號 (Quickbooks ID)</label>
+                    <input type="text" id="cust-id" required class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例如: CUST001">
                 </div>
-                <div class="space-y-1">
-                    <label for="customer-phone" class="block text-sm font-medium text-gray-700" data-lang-key="customerPhone">聯繫電話</label>
-                    <input type="tel" id="customer-phone" name="customer-phone" required
-                        placeholder="65752256"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">電話</label>
+                    <input type="text" id="cust-phone" required class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
                 </div>
-                <div class="space-y-1">
-                    <label for="customer-address" class="block text-sm font-medium text-gray-700" data-lang-key="customerAddress">送貨地址</label>
-                    <textarea id="customer-address" name="customer-address" rows="3" required
-                        placeholder="香港荃灣景圖街1號利工業中心4AC"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">送貨地址</label>
+                    <textarea id="cust-address" required rows="3" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"></textarea>
                 </div>
-                
-                <!-- Gemini LLM Feature: Note Suggestion -->
-                <div class="space-y-1 pt-4 border-t border-gray-100">
-                    <label for="order-notes" class="block text-sm font-medium text-gray-700">額外訂單備註 (Optional)</label>
-                    <div class="flex space-x-2">
-                         <button type="button" onclick="generateOrderNote()" 
-                            class="flex-shrink-0 flex items-center justify-center bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition duration-150 shadow-md">
-                            <span data-lang-key="generateNote">✨ 生成備註建議</span>
-                        </button>
-                        <input type="text" id="order-notes" name="order-notes" maxlength="100"
-                            placeholder="請按「生成建議」或手動輸入..." data-lang-key="notePlaceholder"
-                            class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    
-                </div>
-                
-                <div class="flex justify-end pt-2">
-                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md" data-lang-key="customerSave">
-                        儲存客戶資料
-                    </button>
-                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl">儲存資料</button>
             </form>
         </div>
     </div>
 
-    <!-- MAIN CONTENT AREA -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <!-- Quickbooks Simulation Notice -->
-        <div class="mb-6 p-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-lg text-sm">
-            <p class="font-bold inline" data-lang-key="aboutQBLayer"></p>
-            <span class="font-medium text-xs">(實際部署需連接 QuickBook API)</span>
-        </div>
-
-        <!-- Product List -->
-        <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-gray-700" data-lang-key="categoryFilter">產品分類</h2>
-        </div>
-        
-        <div id="product-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <!-- Products will be rendered here by JS -->
-        </div>
-
-    </main>
-
-    <!-- FLOATING CART PANEL -->
-    <div id="cart-panel" class="fixed top-0 right-0 w-full md:w-96 h-full bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-40 flex flex-col">
-        <!-- Cart Header -->
-        <div class="p-4 bg-blue-600 text-white flex justify-between items-center shadow-md">
-            <h3 class="text-xl font-bold" data-lang-key="cartTitle">客戶訂單 (箱)</h3>
-            <button onclick="toggleCart()" class="p-1 rounded-full hover:bg-blue-700 transition">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-        </div>
-        
-        <!-- Customer Info Warning -->
-        <p id="customer-info-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
-
-        <!-- Enquiry/Stock Warning -->
-        <p id="enquiry-warning" class="text-sm p-3 bg-yellow-100 text-yellow-800 hidden"></p>
-
-        <!-- Cart Items -->
-        <div id="cart-items" class="flex-grow overflow-y-auto divide-y divide-gray-100">
-            <!-- Cart items rendered here by JS -->
-        </div>
-
-        <!-- Cart Footer / Summary -->
-        <div class="p-4 border-t border-gray-200 bg-gray-50 sticky bottom-0">
-            <div class="space-y-2 mb-4">
-                <div class="flex justify-between font-medium text-gray-700">
-                    <span data-lang-key="totalItems">總訂購箱數</span>:
-                    <span id="total-cartons" class="font-bold">0</span>
-                </div>
-                <div class="flex justify-between text-xl font-bold text-blue-700">
-                    <span data-lang-key="totalAmount">預計總金額</span>:
-                    <span id="total-amount">HK$0.00</span>
-                </div>
-            </div>
-            
-            <!-- 提交訂單按鈕 (模擬 Quickbooks 提交) -->
-            <button id="place-order-btn" onclick="placeOrder()" disabled
-                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                <span data-lang-key="placeOrder">確認並提交訂單 (ERP模擬)</span>
-            </button>
-
-            <!-- 後續操作容器 (成功提交 Quickbooks 後顯示) -->
-            <div id="order-actions" class="hidden space-y-2">
-                <p id="order-qr-data" class="text-center text-sm font-semibold text-gray-600 mb-2"></p>
-                <button onclick="downloadIIF()"
-                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                    <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
-                </button>
-                 <button onclick="sendOrderViaWhatsApp()"
-                    class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                    <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <style>
-        .bg-whatsapp { background-color: #25d366; }
-        .hover:bg-whatsapp-dark:hover { background-color: #128c7e; }
-    </style>
-    
-    <script>
-    // --- AUTOSUGGEST LOGIC ---
-    // 由於客戶名單已移除，此處的自動聯想邏輯已不再生效，但保留架構。
-
-    // Function to handle input change and display suggestions
-    function handleAutosuggest(query) {
-        // Logically removed as per user request to use manual input only.
-        const list = document.getElementById('autosuggest-list');
-        list.classList.add('hidden');
-        list.innerHTML = '';
-        return;
-    }
-    
-    // Function to handle selection from the autosuggest list
-    function selectCustomer(customer) {
-        // Logically removed as per user request to use manual input only.
-        return;
-    }
-    
-    // Hide autosuggest list when clicking outside
-    document.addEventListener('click', (e) => {
-        // Logically removed as per user request to use manual input only.
-    });
-
-    </script>
-
-    <!-- HEADER & FIXED NAVIGATION -->
-    <header class="sticky-nav bg-white shadow-lg">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center border-b">
-            <div class="flex items-center space-x-4">
-                <img src="https://placehold.co/40x40/3b82f6/ffffff?text=N1" alt="Nice One Logo" class="rounded-full">
-                <div>
-                    <h1 class="text-xl font-extrabold text-gray-900" data-lang-key="companyName">恆立（香港)有限公司</h1>
-                    <p class="text-sm text-gray-600" data-lang-key="orderingSystem">電子訂單系統</p>
-                </div>
-            </div>
-
-            <div class="flex items-center space-x-4">
-                <!-- Customer Info / Settings Button -->
-                <button onclick="toggleCustomerModal(); window.setupCustomerForm();" class="flex items-center space-x-2 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition duration-150">
-                     <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                     <div id="customer-info-display">
-                         <!-- Customer Name/ID will be displayed here -->
-                     </div>
-                </button>
-                
-                <button id="lang-toggle" onclick="switchLanguage()" class="px-3 py-1 text-sm rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
-                    English
-                </button>
-                <button onclick="toggleCart()" class="relative bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-full shadow-lg transition duration-150">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                    <span id="cart-count" class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">0</span>
-                </button>
-            </div>
-        </div>
-        
-        <!-- Category Filter Bar (Fixed Sticky under Header) -->
-        <div class="w-full bg-gray-50 border-b border-gray-200 shadow-md">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 overflow-x-auto">
-                <div id="category-nav-links" class="flex space-x-3 pb-2">
-                    <!-- Categories rendered here by JS -->
-                </div>
-            </div>
-        </div>
-    </header>
 </body>
 </html>

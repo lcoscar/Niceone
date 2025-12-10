@@ -150,29 +150,24 @@
             window.renderCart && window.renderCart(); 
         }
 
-        // --- OTP/Access Control Logic ---
-        const SECRET_OTP = "123456"; // Simplified static OTP for simulation
-        const WHATSAPP_NUMBER_OTP = "65752256"; // The number to send/receive OTP
+        // --- STATIC PASSWORD / ACCESS CONTROL LOGIC ---
+        // 替換 OTP 為固定的靜態密碼
+        const STATIC_PASSWORD = "5Xi2G5e_v#VX!YH"; 
 
-        function sendOTPSimulation() {
-             const message = `您的恆立批發 App 一次性密碼 (OTP) 是: ${SECRET_OTP}\n\n請在網站輸入此密碼以登入。`;
-             const encodedMessage = encodeURIComponent(message);
-             const whatsappLink = `https://wa.me/852${WHATSAPP_NUMBER_OTP}?text=${encodedMessage}`;
-             window.open(whatsappLink, '_blank');
-        }
-
-        function verifyOTP(event) {
+        // Removed sendOTPSimulation function
+        
+        function verifyPassword(event) {
             event.preventDefault();
-            const inputOTP = document.getElementById('otp-input').value.trim();
-            if (inputOTP === SECRET_OTP) {
+            const inputPassword = document.getElementById('password-input').value.trim();
+            if (inputPassword === STATIC_PASSWORD) {
                 window.isLoggedIn = true;
                 document.body.classList.add('authenticated');
-                document.getElementById('otp-modal').classList.add('hidden');
+                document.getElementById('password-modal').classList.add('hidden');
                 loadCustomerData(); // Load local storage customer data upon login
                 window.showModal("登入成功！", 'success');
             } else {
-                window.showModal("密碼錯誤，請重試或重新獲取 OTP。", 'error');
-                document.getElementById('otp-input').value = '';
+                window.showModal("密碼錯誤，請重試。", 'error');
+                document.getElementById('password-input').value = '';
             }
         }
         
@@ -537,10 +532,9 @@
             customerInfoFillWarning: { cn: "請確保客戶名稱, 客戶編號, 和送貨地址已填寫。", en: "Please ensure Customer Name, ID, and Address are filled." },
             fillCustomerInfo: { cn: "請先設定客戶資料才能下單", en: "Please set customer information before placing an order." },
             orderID: { cn: "訂單編號", en: "Order ID" },
-            otpTitle: { cn: "存取密碼驗證", en: "Access Code Verification" },
-            otpDesc: { cn: "請按下方按鈕獲取一次性密碼 (OTP)，並輸入密碼以進入系統。", en: "Press the button below to receive a One-Time Password (OTP) via WhatsApp." },
-            otpSend: { cn: "發送 OTP 到 65752256", en: "Send OTP to 65752256" },
-            otpVerify: { cn: "驗證密碼並登入", en: "Verify Code and Log In" }
+            passwordTitle: { cn: "存取密碼驗證", en: "Access Code Verification" },
+            passwordDesc: { cn: "請輸入存取密碼以進入系統。", en: "Please enter the access password to enter the system." },
+            passwordVerify: { cn: "驗證密碼並登入", en: "Verify Password and Log In" }
         };
 
         // Expose T function globally for use in Firebase script
@@ -1059,7 +1053,7 @@
         window.onload = function() {
             // Check for authentication first
             if (!window.isLoggedIn) {
-                 document.getElementById('otp-modal').classList.remove('hidden');
+                 document.getElementById('password-modal').classList.remove('hidden');
             } else {
                  document.body.classList.add('authenticated');
             }
@@ -1101,271 +1095,25 @@
         window.renderCart = renderCart; // Expose renderCart
         window.toggleCustomerModal = toggleCustomerModal;
         window.setupCustomerForm = setupCustomerForm;
-        window.sendOTPSimulation = sendOTPSimulation;
-        window.verifyOTP = verifyOTP;
+        window.verifyPassword = verifyPassword;
         window.saveCustomerData = saveCustomerData;
 
     </script>
     
-    <!-- Access Control (OTP Modal) -->
-    <div id="otp-modal" class="fixed inset-0 bg-gray-900 bg-opacity-90 z-[1001] flex items-center justify-center">
+    <!-- Access Control (PASSWORD Modal) -->
+    <div id="password-modal" class="fixed inset-0 bg-gray-900 bg-opacity-90 z-[1001] flex items-center justify-center">
         <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full m-4 p-6 space-y-6">
-            <h3 class="text-2xl font-bold text-center text-blue-700" data-lang-key="otpTitle">存取密碼驗證</h3>
-            <p class="text-sm text-gray-600 text-center" data-lang-key="otpDesc">請按下方按鈕獲取一次性密碼 (OTP)，並輸入密碼以進入系統。</p>
+            <h3 class="text-2xl font-bold text-center text-blue-700" data-lang-key="passwordTitle">存取密碼驗證</h3>
+            <p class="text-sm text-gray-600 text-center" data-lang-key="passwordDesc">請輸入存取密碼以進入系統。</p>
             
-            <!-- Send OTP Button -->
-            <button onclick="sendOTPSimulation()" class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                <span data-lang-key="otpSend">發送 OTP 到 65752256</span>
-            </button>
-
-            <!-- OTP Verification Form -->
-            <form onsubmit="verifyOTP(event)" class="space-y-4 pt-4 border-t border-gray-100">
+            <!-- Password Verification Form -->
+            <form onsubmit="verifyPassword(event)" class="space-y-4 pt-4 border-t border-gray-100">
                 <div>
-                    <label for="otp-input" class="block text-sm font-medium text-gray-700 mb-1">輸入 OTP / Access Code (密碼)</label>
-                    <input type="text" id="otp-input" required maxlength="6"
+                    <label for="password-input" class="block text-sm font-medium text-gray-700 mb-1">輸入 Access Code (密碼)</label>
+                    <input type="password" id="password-input" required
                         class="w-full p-3 border-2 border-gray-300 rounded-lg text-center text-xl tracking-widest focus:border-blue-500 focus:ring-blue-500">
                 </div>
                 <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md">
-                    <span data-lang-key="otpVerify">驗證密碼並登入</span>
+                    <span data-lang-key="passwordVerify">驗證密碼並登入</span>
                 </button>
-                <p class="text-xs text-center text-gray-400">模擬密碼: 123456</p>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal Placeholder for simple messages -->
-    <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
-        <div class="bg-white rounded-lg shadow-2xl max-w-sm w-full transform transition-all duration-300 scale-100">
-            <div id="modal-header" class="p-4 text-white rounded-t-lg flex items-center justify-between bg-blue-500">
-                <span class="font-bold text-lg">提示 (Notice)</span>
-                <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="text-white hover:text-gray-200">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="p-6">
-                <p id="modal-message" class="text-gray-700"></p>
-                <div class="mt-4 flex justify-end">
-                    <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
-                        確定 (OK)
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal Placeholder for Order Success/QR Code -->
-    <div id="custom-modal-qr" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
-        <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100">
-            <div class="p-4 bg-green-500 text-white rounded-t-lg flex items-center justify-between">
-                <span class="font-bold text-lg">✅ 訂單已處理成功 (Order Processed)</span>
-                <button onclick="document.getElementById('custom-modal-qr').classList.add('hidden'); cart = {}; updateCartButtonCount(); renderCart();" class="text-white hover:text-gray-200">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="p-6 text-center">
-                <p id="modal-message-qr" class="text-gray-700 text-lg mb-4 font-semibold"></p>
-                
-                <p class="text-sm text-gray-500 mb-2">倉庫掃描貼紙 (Warehouse Sticker QR Code)</p>
-                <div id="qrcode-container" class="mx-auto w-32 h-32 border-4 border-gray-200 rounded-lg mb-4">
-                    <!-- QR Code will be drawn here -->
-                </div>
-
-                <div class="flex flex-col space-y-2">
-                    <button onclick="downloadIIF(); document.getElementById('custom-modal-qr').classList.add('hidden');" 
-                        class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                        <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
-                    </button>
-                    <button onclick="sendOrderViaWhatsApp(); document.getElementById('custom-modal-qr').classList.add('hidden');"
-                        class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                        <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
-                    </button>
-                </div>
-                <p class="mt-4 text-xs text-gray-400">請完成以上操作後，重新開啟購物車以清空訂單。</p>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal Placeholder for Customer Info Input -->
-    <div id="customer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-center justify-center">
-        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full m-4 transform transition-all duration-300">
-            <div class="p-4 bg-blue-600 text-white rounded-t-xl flex justify-between items-center">
-                <h3 class="text-xl font-bold" data-lang-key="customerInfo">客戶資料設定 (必填)</h3>
-                <button onclick="toggleCustomerModal()" class="p-1 rounded-full hover:bg-blue-700 transition">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-
-            <form id="customer-form" class="p-6 space-y-4">
-                <div class="space-y-1 relative">
-                    <label for="customer-name" class="block text-sm font-medium text-gray-700" data-lang-key="customerName">客戶名稱</label>
-                    <input type="text" id="customer-name" name="customer-name" required oninput="handleAutosuggest(this.value)"
-                        placeholder="恆立有限公司"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                    <!-- Autosuggest Container -->
-                    <div id="autosuggest-list" class="absolute w-full bg-white border border-gray-300 rounded-lg autocomplete-list shadow-lg hidden">
-                        <!-- Suggestions will be added here -->
-                    </div>
-                </div>
-                 <div class="space-y-1">
-                    <label for="customer-id" class="block text-sm font-medium text-gray-700" data-lang-key="customerID">客戶編號 (Quickbooks/ERP ID)</label>
-                    <input type="text" id="customer-id" name="customer-id" required
-                        placeholder="CUST-001"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <div class="space-y-1">
-                    <label for="customer-phone" class="block text-sm font-medium text-gray-700" data-lang-key="customerPhone">聯繫電話</label>
-                    <input type="tel" id="customer-phone" name="customer-phone" required
-                        placeholder="65752256"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <div class="space-y-1">
-                    <label for="customer-address" class="block text-sm font-medium text-gray-700" data-lang-key="customerAddress">送貨地址</label>
-                    <textarea id="customer-address" name="customer-address" rows="3" required
-                        placeholder="香港荃灣景圖街1號利工業中心4AC"
-                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
-                </div>
-                <div class="flex justify-end pt-2">
-                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md" data-lang-key="customerSave">
-                        儲存客戶資料
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- MAIN CONTENT AREA -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <!-- Quickbooks Simulation Notice -->
-        <div class="mb-6 p-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-lg text-sm">
-            <p class="font-bold inline" data-lang-key="aboutQBLayer"></p>
-            <span class="font-medium text-xs">(實際部署需連接 QuickBook API)</span>
-        </div>
-
-        <!-- Product List -->
-        <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-gray-700" data-lang-key="categoryFilter">產品分類</h2>
-        </div>
-        
-        <div id="product-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <!-- Products will be rendered here by JS -->
-        </div>
-
-    </main>
-
-    <!-- FLOATING CART PANEL -->
-    <div id="cart-panel" class="fixed top-0 right-0 w-full md:w-96 h-full bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-40 flex flex-col">
-        <!-- Cart Header -->
-        <div class="p-4 bg-blue-600 text-white flex justify-between items-center shadow-md">
-            <h3 class="text-xl font-bold" data-lang-key="cartTitle">客戶訂單 (箱)</h3>
-            <button onclick="toggleCart()" class="p-1 rounded-full hover:bg-blue-700 transition">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-        </div>
-        
-        <!-- Customer Info Warning -->
-        <p id="customer-info-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
-
-        <!-- Enquiry Warning -->
-        <p id="enquiry-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
-
-        <!-- Cart Items -->
-        <div id="cart-items" class="flex-grow overflow-y-auto divide-y divide-gray-100">
-            <!-- Cart items rendered here by JS -->
-        </div>
-
-        <!-- Cart Footer / Summary -->
-        <div class="p-4 border-t border-gray-200 bg-gray-50 sticky bottom-0">
-            <div class="space-y-2 mb-4">
-                <div class="flex justify-between font-medium text-gray-700">
-                    <span data-lang-key="totalItems">總訂購箱數</span>:
-                    <span id="total-cartons" class="font-bold">0</span>
-                </div>
-                <div class="flex justify-between text-xl font-bold text-blue-700">
-                    <span data-lang-key="totalAmount">預計總金額</span>:
-                    <span id="total-amount">HK$0.00</span>
-                </div>
-            </div>
-            
-            <!-- 提交訂單按鈕 (模擬 Quickbooks 提交) -->
-            <button id="place-order-btn" onclick="placeOrder()" disabled
-                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                <span data-lang-key="placeOrder">確認並提交訂單 (ERP模擬)</span>
-            </button>
-
-            <!-- 後續操作容器 (成功提交 Quickbooks 後顯示) -->
-            <div id="order-actions" class="hidden space-y-2">
-                <p id="order-qr-data" class="text-center text-sm font-semibold text-gray-600 mb-2"></p>
-                <button onclick="downloadIIF()"
-                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                    <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
-                </button>
-                 <button onclick="sendOrderViaWhatsApp()"
-                    class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
-                    <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <style>
-        .bg-whatsapp { background-color: #25d366; }
-        .hover:bg-whatsapp-dark:hover { background-color: #128c7e; }
-    </style>
-    
-    <script>
-    // --- AUTOSUGGEST LOGIC ---
-
-    // Function to handle input change and display suggestions
-    function handleAutosuggest(query) {
-        const list = document.getElementById('autosuggest-list');
-        const customerNameInput = document.getElementById('customer-name');
-        
-        if (query.length < 2 || window.customerList.length === 0) {
-            list.classList.add('hidden');
-            list.innerHTML = '';
-            return;
-        }
-
-        const filtered = window.customerList.filter(customer => 
-            customer.name && customer.name.toLowerCase().includes(query.toLowerCase())
-        );
-
-        list.innerHTML = '';
-        
-        if (filtered.length > 0) {
-            list.classList.remove('hidden');
-            filtered.slice(0, 5).forEach(customer => { // Limit to 5 suggestions
-                const item = document.createElement('div');
-                item.className = 'autocomplete-item text-sm text-gray-800';
-                item.textContent = `${customer.name} (ID: ${customer.customerID})`;
-                item.onclick = () => selectCustomer(customer);
-                list.appendChild(item);
-            });
-        } else {
-            list.classList.add('hidden');
-        }
-    }
-    
-    // Function to handle selection from the autosuggest list
-    function selectCustomer(customer) {
-        document.getElementById('customer-name').value = customer.name || '';
-        document.getElementById('customer-id').value = customer.customerID || '';
-        document.getElementById('customer-address').value = customer.address || 'N/A';
-        document.getElementById('customer-phone').value = customer.phone || 'N/A';
-        
-        // Hide the list after selection
-        document.getElementById('autosuggest-list').classList.add('hidden');
-    }
-    
-    // Hide autosuggest list when clicking outside
-    document.addEventListener('click', (e) => {
-        const list = document.getElementById('autosuggest-list');
-        const input = document.getElementById('customer-name');
-        if (list && input && !input.contains(e.target) && !list.contains(e.target)) {
-            list.classList.add('hidden');
-        }
-    });
-
-    </script>
-</body>
-</html>
+                <p class="text-xs text-center text-gray-400">固

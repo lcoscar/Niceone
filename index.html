@@ -783,7 +783,7 @@
         // --- INTERACTION HANDLERS ---
 
         function toggleCustomerModal() {
-            // 每次打開/關閉模態框時，如果未登入，強制要求登入
+            // 在每次嘗試打開/關閉模態框時，如果未登入，強制要求登入
             if (!window.isLoggedIn) {
                  document.getElementById('password-modal').classList.remove('hidden');
                  return;

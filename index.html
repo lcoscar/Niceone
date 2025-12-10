@@ -33,6 +33,40 @@
         .category-scroll::-webkit-scrollbar {
             display: none;
         }
+
+        /* --- PRINT STYLES FOR LABELS --- */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #print-area, #print-area * {
+                visibility: visible;
+            }
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+            .label-card {
+                break-after: page; /* Force page break after each label */
+                page-break-after: always;
+                width: 95%; /* Adjust for printer width */
+                margin: 0 auto;
+                border: 2px solid black;
+                padding: 10px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                text-align: center;
+                height: 100vh; /* Use full height of the label/page */
+                max-height: 90mm; /* Constraint for typical label height */
+            }
+            /* Hide non-print elements */
+            .no-print {
+                display: none !important;
+            }
+        }
     </style>
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -186,7 +220,16 @@
 
         // Initialize Application
         function init() {
-            // Load customer data if exists
+            // Check for Print Mode URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const printData = urlParams.get('printData');
+            
+            if (printData) {
+                initPrintMode(printData);
+                return; // Stop normal app init
+            }
+
+            // Normal App Init
             try {
                 const stored = localStorage.getItem('wholesale_customer');
                 if (stored) state.customer = JSON.parse(stored);
@@ -204,6 +247,74 @@
             renderCategories();
             renderProducts();
             renderCart();
+        }
+
+        // --- PRINT MODE LOGIC ---
+        function initPrintMode(encodedData) {
+            // 1. Hide Shop UI, Show Print UI
+            document.body.innerHTML = '<div id="print-area"></div>';
+            const printArea = document.getElementById('print-area');
+
+            // 2. Decode Data
+            // Payload format: "oid=SO-123&cust=ABC&d=P1001-5,P1002-3"
+            const params = new URLSearchParams(decodeURIComponent(encodedData));
+            const orderId = params.get('oid');
+            const custName = params.get('cust');
+            const itemsStr = params.get('d'); // "P1001-5,P1002-3"
+
+            if (!itemsStr) {
+                printArea.innerHTML = "<h1>無效的訂單數據</h1>";
+                return;
+            }
+
+            // 3. Process items to generate labels
+            // We need rawData to look up names
+            // Re-process products locally since we are in a fresh reload
+            const productsMap = {};
+            rawData.forEach((p, idx) => {
+                productsMap[`P${idx + 1000}`] = p;
+            });
+
+            const items = itemsStr.split(',');
+            let allLabelsHtml = '';
+
+            items.forEach(itemStr => {
+                const [pid, qtyStr] = itemStr.split('-');
+                const qty = parseInt(qtyStr);
+                const product = productsMap[pid];
+                
+                if (product && qty > 0) {
+                    // Generate one label per piece/carton
+                    for (let i = 1; i <= qty; i++) {
+                        allLabelsHtml += `
+                            <div class="label-card">
+                                <h1 class="text-xl font-bold mb-2">${product.cn}</h1>
+                                <p class="text-sm mb-1">${product.spec}</p>
+                                <p class="text-xs text-gray-500 mb-2">${product.en}</p>
+                                <div class="border-t border-black my-2 pt-2 flex justify-between items-end">
+                                    <div class="text-left">
+                                        <p class="text-xs font-bold">Order: ${orderId}</p>
+                                        <p class="text-xs truncate w-32">${custName}</p>
+                                    </div>
+                                    <div class="text-2xl font-bold">
+                                        ${i} / ${qty}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            });
+
+            // 4. Render and Auto Print
+            printArea.innerHTML = `
+                <div class="no-print p-4 text-center bg-gray-200">
+                    <h2 class="text-xl font-bold mb-2">標籤列印模式</h2>
+                    <button onclick="window.print()" class="bg-blue-600 text-white px-6 py-3 rounded-lg shadow font-bold">🖨️ 立即列印標籤</button>
+                    <p class="mt-2 text-sm text-gray-600">請確保連接標籤打印機 (如 HPRT N31bt)</p>
+                </div>
+                ${allLabelsHtml}
+            `;
         }
 
         // Helper: Format Price
@@ -403,12 +514,19 @@
             const actions = document.getElementById('post-submit-actions');
             actions.classList.remove('hidden');
             
-            // Generate QR
+            // --- NEW: Generate QR for Label Printing ---
+            // Construct payload: oid=ID&cust=Name&d=P1:2,P2:5...
+            const itemsPayload = Object.entries(state.cart).map(([k,v]) => `${k}-${v}`).join(',');
+            const printPayload = `oid=${state.lastOrderId}&cust=${encodeURIComponent(state.customer.name)}&d=${itemsPayload}`;
+            
+            // Generate full URL (current location + query param)
+            const printUrl = window.location.href.split('?')[0] + '?printData=' + encodeURIComponent(printPayload);
+
             document.getElementById('qrcode').innerHTML = '';
             new QRCode(document.getElementById('qrcode'), {
-                text: `NICEONE_${state.lastOrderId}`,
-                width: 100,
-                height: 100
+                text: printUrl,
+                width: 128,
+                height: 128
             });
             
             document.getElementById('success-order-id').innerText = state.lastOrderId;

@@ -48,7 +48,7 @@
 </head>
 <body class="text-gray-800">
 
-    <!-- Mock API Key for Gemini API (Not used in this simulation) -->
+    <!-- Gemini API Key (Required for LLM features) -->
     <script>const apiKey = "";</script>
 
     <!-- Language & Data Layer Mockup -->
@@ -73,13 +73,13 @@
             { name: "Anrie Tan(安) (Branch 2)", customerID: "AT_014", address: "Shop 246 2/F LIK SANG PLAZA", phone: "68712732" },
             { name: "##TUNG TAI / 東泰辦館有限公司 (Branch 2)", customerID: "TT_015", address: "元朗橫卅路16號福達工業大廈按13字A", phone: "2416-2312" },
             { name: "##HUNG KEE WHOLESALE (HK) LTD洪記 (Branch 2)", customerID: "HK_016", address: "北角馬寶道9-15號馬寶閣地下A.B.D號鋪", phone: "25625508" },
-            // Add more entries as needed...
+            // 添加更多條目...
         ];
         
-        window.customerList = LOCAL_CUSTOMER_LIST; // Export for global use
+        window.customerList = LOCAL_CUSTOMER_LIST; // 導出供全局使用
         window.isLoggedIn = false; 
 
-        // Load customer data from localStorage or use default
+        // 載入客戶資料（從 localStorage）
         function loadCustomerData() {
             try {
                 const savedData = localStorage.getItem('currentCustomer');
@@ -100,7 +100,7 @@
             updateCustomerDisplay();
         }
 
-        // Save customer data to localStorage
+        // 儲存客戶資料到 localStorage
         function saveCustomerData(event) {
             event.preventDefault();
 
@@ -122,11 +122,11 @@
             
             updateCustomerDisplay();
             window.showModal(window.T('customerSaveSuccess'), 'success');
-            toggleCustomerModal(); // Close the modal
+            toggleCustomerModal(); // 關閉模態框
         }
 
         function setupCustomerForm() {
-            // Pre-fill form with current data
+            // 預填當前資料
             document.getElementById('customer-name').value = window.customerData.name !== "未登入客戶 (Unauthenticated User)" ? window.customerData.name : '';
             document.getElementById('customer-id').value = window.customerData.customerID !== "GUEST001" ? window.customerData.customerID : '';
             document.getElementById('customer-address').value = window.customerData.address !== "N/A" ? window.customerData.address : '';
@@ -151,24 +151,32 @@
         }
 
         // --- STATIC PASSWORD / ACCESS CONTROL LOGIC ---
-        // 替換 OTP 為固定的靜態密碼
         const STATIC_PASSWORD = "5Xi2G5e_v#VX!YH"; 
 
-        // Removed sendOTPSimulation function
-        
         function verifyPassword(event) {
             event.preventDefault();
             const inputPassword = document.getElementById('password-input').value.trim();
+            
             if (inputPassword === STATIC_PASSWORD) {
                 window.isLoggedIn = true;
                 document.body.classList.add('authenticated');
                 document.getElementById('password-modal').classList.add('hidden');
-                loadCustomerData(); // Load local storage customer data upon login
+                loadCustomerData(); // 載入本地儲存的客戶資料
                 window.showModal("登入成功！", 'success');
             } else {
                 window.showModal("密碼錯誤，請重試。", 'error');
                 document.getElementById('password-input').value = '';
             }
+        }
+        
+        // Function to toggle the customer modal
+        function toggleCustomerModal() {
+            // 每次打開/關閉模態框時，如果未登入，強制要求登入
+            if (!window.isLoggedIn) {
+                 document.getElementById('password-modal').classList.remove('hidden');
+                 return;
+            }
+            document.getElementById('customer-modal').classList.toggle('hidden');
         }
         
         // --- CORE APPLICATION LOGIC REMAINS BELOW ---
@@ -465,12 +473,9 @@
             return new Promise(resolve => {
                 setTimeout(() => { // Simulate network latency
                     const product = window.PRODUCTS.find(p => p.id === productId);
-                    if (product) {
-                        const stock = MOCK_INVENTORY_SYSTEM.get(productId) || 0;
-                        resolve({ ...product, stock });
-                    } else {
-                        resolve(null);
-                    }
+                    // Use static inventory level 100, except for enquiry items (-1)
+                    const stock = MOCK_INVENTORY_SYSTEM.get(productId) || 0;
+                    resolve({ ...product, stock });
                 }, 50);
             });
         }
@@ -534,46 +539,88 @@
             orderID: { cn: "訂單編號", en: "Order ID" },
             passwordTitle: { cn: "存取密碼驗證", en: "Access Code Verification" },
             passwordDesc: { cn: "請輸入存取密碼以進入系統。", en: "Please enter the access password to enter the system." },
-            passwordVerify: { cn: "驗證密碼並登入", en: "Verify Password and Log In" }
+            passwordVerify: { cn: "驗證密碼並登入", en: "Verify Password and Log In" },
+            enquiryWarningSubmit: { cn: "⚠️ 訂單包含無庫存或需查詢報價貨品。請注意，實際庫存和價格需待確認。", en: "⚠️ Order includes out-of-stock or enquiry items. Actual stock/price must be confirmed."},
+            generateNote: { cn: "✨ 生成備註建議", en: "✨ Generate Note Suggestion" },
+            notePlaceholder: { cn: "輸入額外訂單備註 (例如: 緊急/特快件)", en: "Enter additional order notes (e.g., URGENT/Express)" },
         };
 
-        // Expose T function globally for use in Firebase script
+        // Expose T function globally
         window.T = T; 
 
+        // --- LLM Gemini API Integration ---
+        async function generateOrderNote() {
+            if (!window.isLoggedIn) {
+                showModal("請先登入。", 'error');
+                return;
+            }
+            if (Object.keys(cart).length === 0) {
+                showModal(T('emptyCart'), 'error');
+                return;
+            }
+            
+            const noteInput = document.getElementById('order-notes');
+            noteInput.value = window.T('loading') + '...'; // Show loading state
+
+            // 1. Summarize cart details for the prompt
+            const orderSummary = {
+                customer: window.customerData.customerID,
+                totalCartons: Object.values(cart).reduce((sum, qty) => sum + qty, 0),
+                items: Object.keys(cart).map(itemId => {
+                    const item = window.PRODUCTS.find(p => p.id === itemId);
+                    const qty = cart[itemId];
+                    const stock = checkInventory(itemId);
+                    const status = item.price === 9999.00 ? 'Price Enquiry' : (stock <= 50 ? 'Low Stock' : 'In Stock');
+                    return `${item.cn} (Qty: ${qty}, Status: ${status})`;
+                }).join('; ')
+            };
+
+            const systemPrompt = `Act as an expert wholesale logistics coordinator for Nice One (HK) Ltd. Your task is to analyze a sales order summary and provide a brief (max 20 Chinese characters, max 1 line) but highly relevant internal operation note or warning based on the items, customer ID, and status. Focus on risks like bulk, fragility, special pricing, or low stock. Respond only with the suggested note.`;
+
+            const userQuery = `Analyze this order and suggest an internal operational note: Customer ID: ${orderSummary.customer}, Total Cartons: ${orderSummary.totalCartons}, Details: ${orderSummary.items}`;
+            
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                config: {
+                    maxOutputTokens: 50,
+                }
+            };
+
+            try {
+                 const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                const generatedText = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "未能生成有效備註";
+                
+                noteInput.value = generatedText;
+
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                noteInput.value = window.T('noteGenerationFailed');
+            }
+        }
+        
         // --- UI RENDERING FUNCTIONS ---
-
-        function T(key) {
-            return langDict[key] ? langDict[key][currentLang] : key;
-        }
-
-        function switchLanguage() {
-            currentLang = currentLang === 'cn' ? 'en' : 'cn';
-            localStorage.setItem('lang', currentLang);
-            updateUILanguage();
-            renderProducts(currentFilter);
-            renderCart();
-            updateCustomerDisplay(); // Update customer info display language
-        }
-
-        function updateUILanguage() {
-            document.querySelectorAll('[data-lang-key]').forEach(el => {
-                const key = el.getAttribute('data-lang-key');
-                el.textContent = T(key);
-            });
-            document.title = T('appTitle');
-            document.getElementById('lang-toggle').textContent = currentLang === 'cn' ? 'English' : '中文';
-        }
 
         function getStockStatus(stock) {
             let status = { text: '', color: '' };
             if (stock > 50) {
                 status.text = T('inStock');
                 status.color = 'text-green-600 bg-green-100';
-            } else if (stock > 0) {
+            } else if (stock >= 0) { // 允許 0 庫存顯示
                 status.text = T('lowStock');
                 status.color = 'text-yellow-600 bg-yellow-100';
             } else {
-                status.text = T('outOfStock');
+                status.text = T('outOfStock'); // 針對 -1 (查詢價格) 產品
                 status.color = 'text-red-600 bg-red-100';
             }
             return `<span class="px-2 py-0.5 text-xs font-semibold rounded-full ${status.color}">${status.text}</span>`;
@@ -616,6 +663,10 @@
                     ? `<span class="text-xl font-extrabold text-red-500 mb-3">${T('perEnquiry')}</span>`
                     : `<span class="text-xl font-extrabold text-indigo-600 mb-3">HK$${p.price.toFixed(2)}</span>`;
 
+                // 允許下單 (remove disabled attribute)
+                const isItemDisabled = false; // 根據新需求，不再禁用
+                const inputMinQty = '1'; 
+
                 return `
                     <div class="bg-white p-4 rounded-lg shadow-lg hover:shadow-xl transition duration-300 border border-gray-100 flex flex-col justify-between">
                         <div>
@@ -633,17 +684,16 @@
                             <form onsubmit="handleAddToCart(event, '${p.id}', ${stock})" class="flex space-x-2 mt-2">
                                 <div class="flex-grow">
                                     <label for="qty-${p.id}" class="sr-only">${T('quantity')}</label>
-                                    <input type="number" id="qty-${p.id}" min="1" value="1" placeholder="${T('quantity')}"
+                                    <input type="number" id="qty-${p.id}" min="${inputMinQty}" value="1" placeholder="${T('quantity')}"
                                         class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
-                                        style="-moz-appearance: textfield;" ${isEnquiryPrice || stock === 0 ? 'disabled' : ''}>
+                                        style="-moz-appearance: textfield;">
                                 </div>
                                 <button type="submit" 
-                                    class="flex-shrink-0 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md ${isEnquiryPrice || stock === 0 ? 'opacity-50 cursor-not-allowed' : ''}"
-                                    ${isEnquiryPrice || stock === 0 ? 'disabled' : ''}>
+                                    class="flex-shrink-0 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
                                     ${T('addToCart')}
                                 </button>
                             </form>
-                            ${isEnquiryPrice ? '<p class="text-xs text-red-500 mt-1">此貨品需查詢報價，暫不能直接下單。</p>' : ''}
+                            ${isEnquiryPrice ? '<p class="text-xs text-red-500 mt-1">此貨品需查詢報價，提交後需待確認價格。</p>' : ''}
                         </div>
                     </div>
                 `;
@@ -661,7 +711,7 @@
             const itemIds = Object.keys(cart);
             let totalCartons = 0;
             let totalAmount = 0;
-            let containsEnquiryItem = false;
+            let containsEnquiryItemOrZeroStock = false; // Check for enquiry OR zero/negative stock items
             
             // Determine if customer data is minimally filled
             const isCustomerSetup = window.customerData && 
@@ -682,10 +732,14 @@
             let cartHtml = itemIds.map(itemId => {
                 const item = window.PRODUCTS.find(p => p.id === itemId);
                 const qty = cart[itemId];
+                const stock = checkInventory(itemId); // Check current stock
+                
                 if (!item) return '';
                 
                 const isEnquiryPrice = item.price === 9999.00;
-                if (isEnquiryPrice) containsEnquiryItem = true;
+                if (isEnquiryPrice || stock <= 50) { // 庫存緊張也視為需要警告
+                    containsEnquiryItemOrZeroStock = true;
+                }
 
                 const productName = currentLang === 'cn' ? item.cn : item.en;
                 const itemTotal = isEnquiryPrice ? 0 : item.price * qty;
@@ -716,8 +770,8 @@
             totalCartonsEl.textContent = totalCartons;
             totalAmountEl.textContent = `HK$${totalAmount.toFixed(2)}`;
             
-            // 訂單提交邏輯：若含有查詢貨品或訂單為空，則禁用提交按鈕
-            const disableSubmission = containsEnquiryItem || (totalCartons === 0) || !isCustomerSetup;
+            // 訂單提交邏輯：只要有客戶資料和貨品，即允許提交
+            const disableSubmission = (totalCartons === 0) || !isCustomerSetup;
             
             // 顯示/隱藏提交按鈕和後續操作容器
             if (placeOrderBtn.hasAttribute('data-order-submitted')) {
@@ -740,15 +794,11 @@
                  customerWarning.classList.add('hidden');
             }
 
-            // Show enquiry warning
+            // 顯示需要確認的警告 (針對無庫存或查詢價格的產品)
             const enquiryWarning = document.getElementById('enquiry-warning');
-            if (containsEnquiryItem) {
+            if (containsEnquiryItemOrZeroStock && !placeOrderBtn.hasAttribute('data-order-submitted')) {
                 enquiryWarning.classList.remove('hidden');
-                placeOrderBtn.classList.add('hidden'); 
-                orderActionsContainer.classList.add('hidden'); 
-                enquiryWarning.textContent = currentLang === 'cn' 
-                    ? '⚠️ 您的訂單包含「請向我們查詢」貨品，無法計算總金額並提交。請先移除或聯繫我們報價。'
-                    : '⚠️ Your order contains "Price Upon Enquiry" items. Total amount cannot be calculated/submitted. Please remove or contact us for a quote.';
+                enquiryWarning.textContent = T('enquiryWarningSubmit');
             } else {
                 enquiryWarning.classList.add('hidden');
             }
@@ -757,8 +807,9 @@
         // --- INTERACTION HANDLERS ---
 
         function toggleCart() {
+            // 在每次嘗試打開/關閉購物車時，強制要求登入
             if (!window.isLoggedIn) {
-                window.showModal("請先登入才能查看或修改訂單。", 'error');
+                document.getElementById('password-modal').classList.remove('hidden');
                 return;
             }
             
@@ -777,6 +828,8 @@
         function handleAddToCart(event, productId, maxStock) {
              if (!window.isLoggedIn) {
                 window.showModal("請先登入才能下單。", 'error');
+                // 顯示密碼模態框
+                document.getElementById('password-modal').classList.remove('hidden');
                 return;
             }
             
@@ -784,27 +837,30 @@
             const qtyInput = document.getElementById(`qty-${productId}`);
             const qty = parseInt(qtyInput.value, 10);
             const product = window.PRODUCTS.find(p => p.id === productId);
+            const isEnquiryPrice = product.price === 9999.00;
 
-            if (product.price === 9999.00) {
-                showModal('此貨品需查詢報價，暫不能直接下單。 (Price Upon Enquiry)', 'error');
-                return;
-            }
 
             if (isNaN(qty) || qty <= 0) {
                 showModal(T('qtyMustBePositive'));
                 return;
             }
-
-            if (qty > maxStock) {
-                showModal(`${T('qtyExceedsStock')} (Max: ${maxStock} ${T('quantity')})`, 'error');
-                return;
+            
+            // 由於允許無庫存下單，此處僅作提示，不阻止
+            if (!isEnquiryPrice && maxStock < qty) {
+                 showModal(`您訂購的數量 (${qty}) 高於目前庫存 (${maxStock})。訂單將被記錄，但請留意實際出貨量。`, 'info');
             }
+            
+            // 允許將需查詢報價的產品加入購物車
+            if (isEnquiryPrice && qty > 1) {
+                 showModal(`「${product.cn}」需查詢報價。請以箱為單位下單，數量將記錄為 ${qty} 箱。`, 'info');
+            }
+
 
             // Add or update cart
             cart[productId] = (cart[productId] || 0) + qty;
             
             // Show confirmation
-            showModal(`${qty} ${T('quantity')} [${product[currentLang]}] ${T('addToCart')}!`, 'success');
+            showModal(`${qty} ${T('quantity')} [${product.cn}] ${T('addToCart')}!`, 'success');
             
             // Reset input and update UI
             qtyInput.value = 1;
@@ -844,25 +900,36 @@
             let totalAmount = 0;
             let itemLines = '';
             
-            // 1. Generate SPL lines for each item (Sales Receipt or Invoice Items)
+            // 1. Generate SPL lines for each item 
             Object.keys(cart).forEach((itemId, index) => {
                 const item = window.PRODUCTS.find(p => p.id === itemId);
                 const qty = cart[itemId];
-                const price = item.price;
+                
+                // If price needs enquiry, use 0.01 as placeholder to avoid QB error, and note in MEMO.
+                const price = item.price === 9999.00 ? 0.01 : item.price;
                 const lineTotal = price * qty;
                 totalAmount += lineTotal;
                 
-                // Assuming Quickbooks uses the product ID as the Item code (must match Quickbooks setup)
-                // QTY is positive for Sales/Invoice
+                let memo = item.cn + " (" + item.details + ")";
+                if (item.price === 9999.00) {
+                    memo += " - PRICE PENDING CONFIRMATION";
+                }
+                
                 // Account for Sales: 'Sales' (Must match your QB Chart of Accounts)
-                itemLines += `SPL\t\tINVOICE\t${today}\tSales\t${customer.customerID}\t${lineTotal.toFixed(2)}\t${orderId}\t${item.cn} (${item.details})\t${item.id}\t${qty}\t${price.toFixed(2)}\t${lineTotal.toFixed(2)}\n`;
+                itemLines += `SPL\t\tINVOICE\t${today}\tSales\t${customer.customerID}\t${lineTotal.toFixed(2)}\t${orderId}\t${memo}\t${item.id}\t${qty}\t${price.toFixed(2)}\t${lineTotal.toFixed(2)}\n`;
             });
             
             // 2. Generate TRNS line (Invoice Header)
             // Assuming "Accounts Receivable" as the account for the invoice total
             const formattedAddress = customer.address.replace(/\n/g, ' '); // IIF requires single line for address field
+            const orderNotes = document.getElementById('order-notes').value.trim();
             
-            iifContent += `TRNS\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${totalAmount.toFixed(2)}\t${orderId}\tWholesale Order for ${customer.name}\t${formattedAddress}\n`;
+            let transactionMemo = `Wholesale Order for ${customer.name}`;
+            if (orderNotes) {
+                transactionMemo += ` | Note: ${orderNotes}`;
+            }
+
+            iifContent += `TRNS\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${totalAmount.toFixed(2)}\t${orderId}\t${transactionMemo}\t${formattedAddress}\n`;
             
             // 3. Append item SPL lines
             iifContent += itemLines;
@@ -907,10 +974,12 @@
                 const item = window.PRODUCTS.find(p => p.id === itemId);
                 const qty = cart[itemId];
                 const productName = item[currentLang];
-                const price = item.price.toFixed(2);
                 
-                // 格式: 產品名稱 (規格) - HK$價格 x 數量
-                return `${productName} (${item.details}) - HK$${price} x ${qty} 箱`;
+                const isEnquiry = item.price === 9999.00;
+                const priceText = isEnquiry ? T('perEnquiry') : `HK$${item.price.toFixed(2)}`;
+                
+                // 格式: 產品名稱 (規格) - 價格 x 數量
+                return `${productName} (${item.details}) - ${priceText} x ${qty} 箱`;
             }).join('\n');
             
             const totalCartons = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
@@ -928,7 +997,9 @@
             const note = T('whatsappMessageNote');
             
             const qrCodeContent = `NICEONE_ORDER_${lastOrderID}`;
-            
+            const orderNotes = document.getElementById('order-notes').value.trim();
+            const noteLine = orderNotes ? `內部備註: ${orderNotes}\n` : '';
+
             const whatsappMessage = 
                 `${messageTitle}\n` +
                 `============================\n` +
@@ -943,9 +1014,9 @@
                 `\n` +
                 `============================\n` +
                 `${totalCartonsText}: ${totalCartons} 箱\n` +
-                `${totalAmountText}: HK$${totalAmount.toFixed(2)}\n` +
+                `${totalAmountText}: HK$${totalAmount.toFixed(2)} (不包含需查詢報價貨品)\n` +
                 `============================\n` +
-                `\n` +
+                noteLine +
                 `${note}\n` +
                 `倉庫貼紙二維碼內容:\n${qrCodeContent}`; // Mention the QR code content clearly
 
@@ -971,14 +1042,7 @@
                  showModal(T('fillCustomerInfo'), 'error');
                  return;
             }
-
-            // 確保沒有查詢貨品
-            const containsEnquiry = Object.keys(cart).some(id => window.PRODUCTS.find(p => p.id === id)?.price === 9999.00);
-            if (containsEnquiry) {
-                showModal('訂單包含需查詢報價的貨品，請先移除。', 'error');
-                return;
-            }
-
+            
             // SIMULATION: Generate unique Order ID
             const orderId = `SO-${Date.now()}`;
             lastOrderID = orderId;
@@ -1097,6 +1161,7 @@
         window.setupCustomerForm = setupCustomerForm;
         window.verifyPassword = verifyPassword;
         window.saveCustomerData = saveCustomerData;
+        window.generateOrderNote = generateOrderNote; // Expose LLM function
 
     </script>
     
@@ -1116,4 +1181,300 @@
                 <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md">
                     <span data-lang-key="passwordVerify">驗證密碼並登入</span>
                 </button>
-                <p class="text-xs text-center text-gray-400">固
+                <p class="text-xs text-center text-gray-400">固定密碼: 5Xi2G5e_v#VX!YH</p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Placeholder for simple messages -->
+    <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
+        <div class="bg-white rounded-lg shadow-2xl max-w-sm w-full transform transition-all duration-300 scale-100">
+            <div id="modal-header" class="p-4 text-white rounded-t-lg flex items-center justify-between bg-blue-500">
+                <span class="font-bold text-lg">提示 (Notice)</span>
+                <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="text-white hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <p id="modal-message" class="text-gray-700"></p>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                        確定 (OK)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Placeholder for Order Success/QR Code -->
+    <div id="custom-modal-qr" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
+        <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100">
+            <div class="p-4 bg-green-500 text-white rounded-t-lg flex items-center justify-between">
+                <span class="font-bold text-lg">✅ 訂單已處理成功 (Order Processed)</span>
+                <button onclick="document.getElementById('custom-modal-qr').classList.add('hidden'); cart = {}; updateCartButtonCount(); renderCart();" class="text-white hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6 text-center">
+                <p id="modal-message-qr" class="text-gray-700 text-lg mb-4 font-semibold"></p>
+                
+                <p class="text-sm text-gray-500 mb-2">倉庫掃描貼紙 (Warehouse Sticker QR Code)</p>
+                <div id="qrcode-container" class="mx-auto w-32 h-32 border-4 border-gray-200 rounded-lg mb-4">
+                    <!-- QR Code will be drawn here -->
+                </div>
+
+                <div class="flex flex-col space-y-2">
+                    <button onclick="downloadIIF(); document.getElementById('custom-modal-qr').classList.add('hidden');" 
+                        class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                        <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
+                    </button>
+                    <button onclick="sendOrderViaWhatsApp(); document.getElementById('custom-modal-qr').classList.add('hidden');"
+                        class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                        <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
+                    </button>
+                </div>
+                <p class="mt-4 text-xs text-gray-400">請完成以上操作後，重新開啟購物車以清空訂單。</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Placeholder for Customer Info Input -->
+    <div id="customer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full m-4 transform transition-all duration-300">
+            <div class="p-4 bg-blue-600 text-white rounded-t-xl flex justify-between items-center">
+                <h3 class="text-xl font-bold" data-lang-key="customerInfo">客戶資料設定 (必填)</h3>
+                <button onclick="toggleCustomerModal()" class="p-1 rounded-full hover:bg-blue-700 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <form id="customer-form" class="p-6 space-y-4">
+                <div class="space-y-1 relative">
+                    <label for="customer-name" class="block text-sm font-medium text-gray-700" data-lang-key="customerName">客戶名稱</label>
+                    <input type="text" id="customer-name" name="customer-name" required oninput="handleAutosuggest(this.value)"
+                        placeholder="恆立有限公司"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                    <!-- Autosuggest Container -->
+                    <div id="autosuggest-list" class="absolute w-full bg-white border border-gray-300 rounded-lg autocomplete-list shadow-lg hidden">
+                        <!-- Suggestions will be added here -->
+                    </div>
+                </div>
+                 <div class="space-y-1">
+                    <label for="customer-id" class="block text-sm font-medium text-gray-700" data-lang-key="customerID">客戶編號 (Quickbooks/ERP ID)</label>
+                    <input type="text" id="customer-id" name="customer-id" required
+                        placeholder="CUST-001"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div class="space-y-1">
+                    <label for="customer-phone" class="block text-sm font-medium text-gray-700" data-lang-key="customerPhone">聯繫電話</label>
+                    <input type="tel" id="customer-phone" name="customer-phone" required
+                        placeholder="65752256"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div class="space-y-1">
+                    <label for="customer-address" class="block text-sm font-medium text-gray-700" data-lang-key="customerAddress">送貨地址</label>
+                    <textarea id="customer-address" name="customer-address" rows="3" required
+                        placeholder="香港荃灣景圖街1號利工業中心4AC"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
+                </div>
+                
+                <!-- Gemini LLM Feature: Note Suggestion -->
+                <div class="space-y-1 pt-4 border-t border-gray-100">
+                    <label for="order-notes" class="block text-sm font-medium text-gray-700">額外訂單備註 (Optional)</label>
+                    <div class="flex space-x-2">
+                         <button type="button" onclick="generateOrderNote()" 
+                            class="flex-shrink-0 flex items-center justify-center bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition duration-150 shadow-md">
+                            <span data-lang-key="generateNote">✨ 生成備註建議</span>
+                        </button>
+                        <input type="text" id="order-notes" name="order-notes" maxlength="100"
+                            placeholder="請按「生成建議」或手動輸入..." data-lang-key="notePlaceholder"
+                            class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    
+                </div>
+                
+                <div class="flex justify-end pt-2">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md" data-lang-key="customerSave">
+                        儲存客戶資料
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Quickbooks Simulation Notice -->
+        <div class="mb-6 p-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-lg text-sm">
+            <p class="font-bold inline" data-lang-key="aboutQBLayer"></p>
+            <span class="font-medium text-xs">(實際部署需連接 QuickBook API)</span>
+        </div>
+
+        <!-- Product List -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-700" data-lang-key="categoryFilter">產品分類</h2>
+        </div>
+        
+        <div id="product-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <!-- Products will be rendered here by JS -->
+        </div>
+
+    </main>
+
+    <!-- FLOATING CART PANEL -->
+    <div id="cart-panel" class="fixed top-0 right-0 w-full md:w-96 h-full bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-40 flex flex-col">
+        <!-- Cart Header -->
+        <div class="p-4 bg-blue-600 text-white flex justify-between items-center shadow-md">
+            <h3 class="text-xl font-bold" data-lang-key="cartTitle">客戶訂單 (箱)</h3>
+            <button onclick="toggleCart()" class="p-1 rounded-full hover:bg-blue-700 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <!-- Customer Info Warning -->
+        <p id="customer-info-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
+
+        <!-- Enquiry/Stock Warning -->
+        <p id="enquiry-warning" class="text-sm p-3 bg-yellow-100 text-yellow-800 hidden"></p>
+
+        <!-- Cart Items -->
+        <div id="cart-items" class="flex-grow overflow-y-auto divide-y divide-gray-100">
+            <!-- Cart items rendered here by JS -->
+        </div>
+
+        <!-- Cart Footer / Summary -->
+        <div class="p-4 border-t border-gray-200 bg-gray-50 sticky bottom-0">
+            <div class="space-y-2 mb-4">
+                <div class="flex justify-between font-medium text-gray-700">
+                    <span data-lang-key="totalItems">總訂購箱數</span>:
+                    <span id="total-cartons" class="font-bold">0</span>
+                </div>
+                <div class="flex justify-between text-xl font-bold text-blue-700">
+                    <span data-lang-key="totalAmount">預計總金額</span>:
+                    <span id="total-amount">HK$0.00</span>
+                </div>
+            </div>
+            
+            <!-- 提交訂單按鈕 (模擬 Quickbooks 提交) -->
+            <button id="place-order-btn" onclick="placeOrder()" disabled
+                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                <span data-lang-key="placeOrder">確認並提交訂單 (ERP模擬)</span>
+            </button>
+
+            <!-- 後續操作容器 (成功提交 Quickbooks 後顯示) -->
+            <div id="order-actions" class="hidden space-y-2">
+                <p id="order-qr-data" class="text-center text-sm font-semibold text-gray-600 mb-2"></p>
+                <button onclick="downloadIIF()"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                    <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
+                </button>
+                 <button onclick="sendOrderViaWhatsApp()"
+                    class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                    <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        .bg-whatsapp { background-color: #25d366; }
+        .hover:bg-whatsapp-dark:hover { background-color: #128c7e; }
+    </style>
+    
+    <script>
+    // --- AUTOSUGGEST LOGIC ---
+
+    // Function to handle input change and display suggestions
+    function handleAutosuggest(query) {
+        const list = document.getElementById('autosuggest-list');
+        const customerNameInput = document.getElementById('customer-name');
+        
+        if (query.length < 2 || window.customerList.length === 0) {
+            list.classList.add('hidden');
+            list.innerHTML = '';
+            return;
+        }
+
+        const filtered = window.customerList.filter(customer => 
+            customer.name && customer.name.toLowerCase().includes(query.toLowerCase())
+        );
+
+        list.innerHTML = '';
+        
+        if (filtered.length > 0) {
+            list.classList.remove('hidden');
+            filtered.slice(0, 5).forEach(customer => { // Limit to 5 suggestions
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item text-sm text-gray-800';
+                item.textContent = `${customer.name} (ID: ${customer.customerID})`;
+                item.onclick = () => selectCustomer(customer);
+                list.appendChild(item);
+            });
+        } else {
+            list.classList.add('hidden');
+        }
+    }
+    
+    // Function to handle selection from the autosuggest list
+    function selectCustomer(customer) {
+        document.getElementById('customer-name').value = customer.name || '';
+        document.getElementById('customer-id').value = customer.customerID || '';
+        document.getElementById('customer-address').value = customer.address || 'N/A';
+        document.getElementById('customer-phone').value = customer.phone || 'N/A';
+        
+        // Hide the list after selection
+        document.getElementById('autosuggest-list').classList.add('hidden');
+    }
+    
+    // Hide autosuggest list when clicking outside
+    document.addEventListener('click', (e) => {
+        const list = document.getElementById('autosuggest-list');
+        const input = document.getElementById('customer-name');
+        if (list && input && !input.contains(e.target) && !list.contains(e.target)) {
+            list.classList.add('hidden');
+        }
+    });
+
+    </script>
+
+    <!-- HEADER & FIXED NAVIGATION -->
+    <header class="sticky-nav bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center border-b">
+            <div class="flex items-center space-x-4">
+                <img src="https://placehold.co/40x40/3b82f6/ffffff?text=N1" alt="Nice One Logo" class="rounded-full">
+                <div>
+                    <h1 class="text-xl font-extrabold text-gray-900" data-lang-key="companyName">恆立（香港)有限公司</h1>
+                    <p class="text-sm text-gray-600" data-lang-key="orderingSystem">電子訂單系統</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <!-- Customer Info / Settings Button -->
+                <button onclick="toggleCustomerModal(); window.setupCustomerForm();" class="flex items-center space-x-2 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition duration-150">
+                     <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                     <div id="customer-info-display">
+                         <!-- Customer Name/ID will be displayed here -->
+                     </div>
+                </button>
+                
+                <button id="lang-toggle" onclick="switchLanguage()" class="px-3 py-1 text-sm rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
+                    English
+                </button>
+                <button onclick="toggleCart()" class="relative bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-full shadow-lg transition duration-150">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    <span id="cart-count" class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">0</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Category Filter Bar (Fixed Sticky under Header) -->
+        <div class="w-full bg-gray-50 border-b border-gray-200 shadow-md">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 overflow-x-auto">
+                <div id="category-nav-links" class="flex space-x-3 pb-2">
+                    <!-- Categories rendered here by JS -->
+                </div>
+            </div>
+        </div>
+    </header>
+</body>
+</html>

@@ -12,8 +12,8 @@
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f7f7f7;
-            /* 移除密碼保護，直接顯示內容 */
-            visibility: visible;
+            /* 預設隱藏主內容，直到登入成功 */
+            visibility: hidden;
         }
         body.authenticated {
             visibility: visible;
@@ -30,7 +30,7 @@
     <!-- QR Code Library for generating QR codes client-side -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
-<body class="text-gray-800 authenticated">
+<body class="text-gray-800">
 
     <!-- Gemini API Key (Required for LLM features) -->
     <script>const apiKey = "";</script>
@@ -40,8 +40,8 @@
         // --- CUSTOMER DATA STORAGE (LOCAL MODE) ---
         
         // 客戶名單已移除，改為手動輸入
-        window.customerList = []; 
-        window.isLoggedIn = true; // 預設為已登入 (因密碼功能移除)
+        window.customerList = []; // 保持為空，不再使用自動聯想
+        window.isLoggedIn = false; // 預設為未登入，需通過密碼驗證
 
         // 載入客戶資料（從 localStorage）
         function loadCustomerData() {
@@ -116,9 +116,33 @@
 
         // Function to toggle the customer modal
         function toggleCustomerModal() {
+            // 在每次嘗試打開/關閉模態框時，如果未登入，強制要求登入
+            if (!window.isLoggedIn) {
+                 document.getElementById('password-modal').classList.remove('hidden');
+                 return;
+            }
             document.getElementById('customer-modal').classList.toggle('hidden');
         }
         
+        // --- STATIC PASSWORD / ACCESS CONTROL LOGIC ---
+        const STATIC_PASSWORD = "5Xi2G5e_v#VX!YH"; 
+
+        function verifyPassword(event) {
+            event.preventDefault();
+            const inputPassword = document.getElementById('password-input').value.trim();
+            
+            if (inputPassword === STATIC_PASSWORD) {
+                window.isLoggedIn = true;
+                document.body.classList.add('authenticated');
+                document.getElementById('password-modal').classList.add('hidden');
+                loadCustomerData(); // 載入本地儲存的客戶資料
+                window.showModal("登入成功！", 'success');
+            } else {
+                window.showModal("密碼錯誤，請重試。", 'error');
+                document.getElementById('password-input').value = '';
+            }
+        }
+
         // --- CORE APPLICATION LOGIC REMAINS BELOW ---
         
         const APP_ID = "1:896047165968:web:33b2ab2ef72accbd849095"; // Hardcoded App ID for consistency
@@ -1076,6 +1100,13 @@
         // --- INITIALIZATION ---
 
         window.onload = function() {
+            // Check for authentication first
+            if (!window.isLoggedIn) {
+                 document.getElementById('password-modal').classList.remove('hidden');
+            } else {
+                 document.body.classList.add('authenticated');
+            }
+            
             // Load language preference
             const savedLang = localStorage.getItem('lang');
             if (savedLang) {
@@ -1117,6 +1148,7 @@
         window.verifyPassword = verifyPassword;
         window.saveCustomerData = saveCustomerData;
         window.generateOrderNote = generateOrderNote; // Expose LLM function
+
     </script>
     
     <!-- Access Control (PASSWORD Modal) -->
@@ -1333,56 +1365,26 @@
     
     <script>
     // --- AUTOSUGGEST LOGIC ---
+    // 由於客戶名單已移除，此處的自動聯想邏輯已不再生效，但保留架構。
 
     // Function to handle input change and display suggestions
     function handleAutosuggest(query) {
+        // Logically removed as per user request to use manual input only.
         const list = document.getElementById('autosuggest-list');
-        const customerNameInput = document.getElementById('customer-name');
-        
-        if (query.length < 2 || window.customerList.length === 0) {
-            list.classList.add('hidden');
-            list.innerHTML = '';
-            return;
-        }
-
-        const filtered = window.customerList.filter(customer => 
-            customer.name && customer.name.toLowerCase().includes(query.toLowerCase())
-        );
-
+        list.classList.add('hidden');
         list.innerHTML = '';
-        
-        if (filtered.length > 0) {
-            list.classList.remove('hidden');
-            filtered.slice(0, 5).forEach(customer => { // Limit to 5 suggestions
-                const item = document.createElement('div');
-                item.className = 'autocomplete-item text-sm text-gray-800';
-                item.textContent = `${customer.name} (ID: ${customer.customerID})`;
-                item.onclick = () => selectCustomer(customer);
-                list.appendChild(item);
-            });
-        } else {
-            list.classList.add('hidden');
-        }
+        return;
     }
     
     // Function to handle selection from the autosuggest list
     function selectCustomer(customer) {
-        document.getElementById('customer-name').value = customer.name || '';
-        document.getElementById('customer-id').value = customer.customerID || '';
-        document.getElementById('customer-address').value = customer.address || 'N/A';
-        document.getElementById('customer-phone').value = customer.phone || 'N/A';
-        
-        // Hide the list after selection
-        document.getElementById('autosuggest-list').classList.add('hidden');
+        // Logically removed as per user request to use manual input only.
+        return;
     }
     
     // Hide autosuggest list when clicking outside
     document.addEventListener('click', (e) => {
-        const list = document.getElementById('autosuggest-list');
-        const input = document.getElementById('customer-name');
-        if (list && input && !input.contains(e.target) && !list.contains(e.target)) {
-            list.classList.add('hidden');
-        }
+        // Logically removed as per user request to use manual input only.
     });
 
     </script>

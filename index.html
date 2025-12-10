@@ -22,18 +22,200 @@
             z-index: 50;
         }
     </style>
+    <!-- QR Code Library for generating QR codes client-side -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="text-gray-800">
 
     <!-- Mock API Key for Gemini API (Not used in this simulation) -->
     <script>const apiKey = "";</script>
 
+    <!-- Firebase Imports for Secure User Data and Order History (Firestore) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Set log level for debugging (optional)
+        setLogLevel('debug');
+
+        // Global variables for Firebase access
+        window.fb = {};
+
+        // Hardcoded Firebase Config based on user's input
+        const firebaseConfig = {
+            apiKey: "AIzaSyCXOivghs2ZTH0h_JF_e5j9l2IseS6SLVc",
+            authDomain: "nihce-one.firebaseapp.com",
+            projectId: "nihce-one",
+            storageBucket: "nihce-one.firebasestorage.app",
+            messagingSenderId: "896047165968",
+            appId: "1:896047165968:web:33b2ab2ef72accbd849095",
+            measurementId: "G-9J2R8JVRLM"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+
+        // Function to initialize Firebase and authenticate
+        async function initializeFirebase() {
+            try {
+                // 1. Initialize App and Services
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+
+                window.fb.db = db;
+                window.fb.auth = auth;
+                window.fb.isReady = false;
+
+                // 2. Authenticate
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // 3. Auth State Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        window.fb.userId = user.uid;
+                        window.fb.isReady = true;
+                        // Since Firebase is ready, load customer data
+                        loadCustomerData();
+                    } else {
+                        window.fb.isReady = false;
+                        window.fb.userId = crypto.randomUUID(); // Fallback for mock environment
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+            }
+        }
+        
+        // --- CUSTOMER DATA MANAGEMENT (Firestore Integration) ---
+        
+        // Mock default customer data (to be replaced by Firestore data)
+        window.customerData = {
+            name: "未登入客戶 (Unauthenticated User)",
+            customerID: "GUEST001",
+            address: "N/A",
+            phone: "N/A"
+        };
+
+        // Function to set up the customer data form and initial display
+        function setupCustomerForm() {
+            // Pre-fill form with current data
+            document.getElementById('customer-name').value = window.customerData.name !== "未登入客戶 (Unauthenticated User)" ? window.customerData.name : '';
+            document.getElementById('customer-id').value = window.customerData.customerID !== "GUEST001" ? window.customerData.customerID : '';
+            document.getElementById('customer-address').value = window.customerData.address !== "N/A" ? window.customerData.address : '';
+            document.getElementById('customer-phone').value = window.customerData.phone !== "N/A" ? window.customerData.phone : '';
+
+            const form = document.getElementById('customer-form');
+            if (form) {
+                form.onsubmit = saveCustomerData;
+            }
+            updateCustomerDisplay();
+        }
+
+        // Simulates loading/listening to customer profile data (private storage)
+        async function loadCustomerData() {
+            if (!window.fb.isReady || !window.fb.db || !window.fb.userId) return;
+
+            const db = window.fb.db;
+            const userId = window.fb.userId;
+            const appId = firebaseConfig.appId; // Use hardcoded appId
+            
+            // Path: /artifacts/{appId}/users/{userId}/customer_profile/main
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/customer_profile/main`);
+            
+            try {
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    window.customerData = docSnap.data();
+                } else {
+                    console.log("No existing customer profile found, using default data.");
+                }
+            } catch (e) {
+                console.error("Error loading customer data:", e);
+            }
+            updateCustomerDisplay();
+        }
+
+        // Simulates saving customer profile data
+        async function saveCustomerData(event) {
+            event.preventDefault();
+            const db = window.fb.db;
+            const userId = window.fb.userId;
+            const appId = firebaseConfig.appId; 
+            
+            if (!window.fb.isReady || !db || !userId) {
+                window.showModal("Database not ready or User ID missing. Cannot save data.", 'error');
+                return;
+            }
+
+            const newCustomerData = {
+                name: document.getElementById('customer-name').value.trim() || "Unnamed Customer",
+                customerID: document.getElementById('customer-id').value.trim() || "CUST-UNASSIGNED",
+                address: document.getElementById('customer-address').value.trim() || "No Address Provided",
+                phone: document.getElementById('customer-phone').value.trim() || "No Phone Provided"
+            };
+            
+            if (newCustomerData.customerID === "CUST-UNASSIGNED" || !newCustomerData.name || newCustomerData.address === "No Address Provided") {
+                 window.showModal("請確保客戶名稱, 客戶編號, 和送貨地址已填寫。", 'error');
+                 return;
+            }
+
+
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/customer_profile/main`);
+            
+            try {
+                await setDoc(docRef, newCustomerData, { merge: true });
+                window.customerData = newCustomerData;
+                updateCustomerDisplay();
+                window.showModal(window.T('customerSaveSuccess'), 'success');
+                toggleCustomerModal(); // Close the modal
+            } catch (e) {
+                console.error("Error saving customer data:", e);
+                window.showModal(window.T('customerSaveError'), 'error');
+            }
+        }
+        
+        function updateCustomerDisplay() {
+            const display = document.getElementById('customer-info-display');
+            if (display) {
+                display.innerHTML = `
+                    <p class="font-bold text-gray-900">${window.T('customerName')}: ${window.customerData.name}</p>
+                    <p class="text-xs text-gray-500">${window.T('customerID')}: ${window.customerData.customerID}</p>
+                `;
+            }
+            // Ensure cart is re-rendered to update submission button status based on customer data
+            window.renderCart && window.renderCart(); 
+        }
+        
+        // Function to toggle the customer modal
+        function toggleCustomerModal() {
+            document.getElementById('customer-modal').classList.toggle('hidden');
+        }
+
+        // Expose functions globally for HTML access
+        window.initializeFirebase = initializeFirebase;
+        window.saveCustomerData = saveCustomerData;
+        window.toggleCustomerModal = toggleCustomerModal;
+        window.setupCustomerForm = setupCustomerForm;
+        
+        // Call initialization
+        initializeFirebase();
+    </script>
+    
+    <!-- Code continues after Firebase setup... -->
+
     <!-- Language & Data Layer Mockup -->
     <script>
         // --- MOCK DATA LAYER (SIMULATING QUICKBOOKS/INVENTORY) ---
 
         // In a real application, this data would be fetched from your QuickBooks/ERP API.
-        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'niceone-wholesale-app';
+        const APP_ID = "1:896047165968:web:33b2ab2ef72accbd849095"; // Hardcoded App ID for consistency
         let MOCK_INVENTORY_SYSTEM = new Map(); // Simulates stock levels in QB
 
         const CATEGORIES = {
@@ -316,12 +498,17 @@
              }
              return p;
         });
+        
+        // Expose PRODUCTS array for IIF generation
+        window.PRODUCTS = PRODUCTS; 
+        
+        // --- Quickbooks/Inventory Mock functions ---
 
         // Function to simulate QuickBooks data fetch (Async operation)
         function fetchProductData(productId) {
             return new Promise(resolve => {
                 setTimeout(() => { // Simulate network latency
-                    const product = PRODUCTS.find(p => p.id === productId);
+                    const product = window.PRODUCTS.find(p => p.id === productId);
                     if (product) {
                         const stock = MOCK_INVENTORY_SYSTEM.get(productId) || 0;
                         resolve({ ...product, stock });
@@ -342,8 +529,9 @@
         let cart = {}; // { productId: quantity_in_cartons }
         let currentFilter = 'HOT_ITEMS';
         let isCartOpen = false;
+        let lastOrderID = null; // Store the last order ID for QR code generation
         
-        // ** 新增：WhatsApp 目標電話號碼 **
+        // ** WhatsApp 目標電話號碼 **
         const WHATSAPP_NUMBER = "65752256";
 
         const langDict = {
@@ -366,9 +554,10 @@
             totalItems: { cn: '總訂購箱數', en: 'Total Cartons' },
             totalAmount: { cn: '預計總金額', en: 'Est. Total Amount' },
             emptyCart: { cn: '訂單為空，請加入貨品', en: 'Your order is empty. Please add items.' },
-            placeOrder: { cn: '確認並提交訂單 (模擬)', en: 'Place Order (Simulated)' },
-            sendOrder: { cn: '發送訂單至 WhatsApp', en: 'Send Order via WhatsApp' }, // 新增按鈕文本
-            orderSuccess: { cn: '模擬 Quickbooks 提交成功！請按「發送訂單」以完成訂單。', en: 'Simulated Quickbooks submission successful! Please press "Send Order" to finalize.' },
+            placeOrder: { cn: '確認並提交訂單 (ERP模擬)', en: 'Submit Order (ERP Sim.)' },
+            sendOrder: { cn: '發送訂單至 WhatsApp (含QR)', en: 'Send Order via WhatsApp (w/QR)' }, 
+            downloadIIF: { cn: '下載 IIF 文件 (Quickbooks)', en: 'Download IIF (Quickbooks)' }, // IIF 按鈕文本
+            orderSuccess: { cn: '訂單處理成功！請使用下方按鈕進行下一步。', en: 'Order processed successfully! Use the buttons below for next steps.' },
             qtyMustBePositive: { cn: '訂購數量必須為正整數', en: 'Order quantity must be a positive integer.' },
             qtyExceedsStock: { cn: '訂購數量超出庫存', en: 'Order quantity exceeds current stock.' },
             categoryFilter: { cn: '產品分類', en: 'Product Category' },
@@ -376,8 +565,21 @@
             whatsappMessageTitle: { cn: "新訂單 (App 下單) - 恆立批發", en: "New Order (App Order) - Nice One Wholesale" },
             whatsappMessageSubtotal: { cn: "預計總金額", en: "Est. Subtotal" },
             whatsappMessageTotalCartons: { cn: "總箱數", en: "Total Cartons" },
-            whatsappMessageNote: { cn: "請盡快跟進此訂單並安排送貨。 (App ID:", en: "Please follow up on this order and arrange delivery. (App ID:" }
+            whatsappMessageNote: { cn: "請盡快跟進此訂單並安排送貨。", en: "Please follow up on this order and arrange delivery." },
+            customerName: { cn: "客戶名稱", en: "Customer Name" },
+            customerID: { cn: "客戶編號", en: "Customer ID" },
+            customerAddress: { cn: "送貨地址", en: "Delivery Address" },
+            customerPhone: { cn: "聯繫電話", en: "Phone Number" },
+            customerInfo: { cn: "客戶資料設定 (必填)", en: "Customer Information (Required)" },
+            customerSave: { cn: "儲存客戶資料", en: "Save Customer Data" },
+            customerSaveSuccess: { cn: "客戶資料已安全儲存。", en: "Customer data saved securely." },
+            customerSaveError: { cn: "儲存客戶資料失敗。", en: "Failed to save customer data." },
+            fillCustomerInfo: { cn: "請先設定客戶資料才能下單", en: "Please set customer information before placing an order." },
+            orderID: { cn: "訂單編號", en: "Order ID" }
         };
+
+        // Expose T function globally for use in Firebase script
+        window.T = T; 
 
         // --- UI RENDERING FUNCTIONS ---
 
@@ -391,6 +593,7 @@
             updateUILanguage();
             renderProducts(currentFilter);
             renderCart();
+            updateCustomerDisplay(); // Update customer info display language
         }
 
         function updateUILanguage() {
@@ -420,7 +623,7 @@
         async function renderProducts(categoryKey) {
             currentFilter = categoryKey;
             const container = document.getElementById('product-list');
-            const filteredProducts = PRODUCTS.filter(p =>
+            const filteredProducts = window.PRODUCTS.filter(p =>
                 categoryKey === 'HOT_ITEMS' ? p.isHot : p.category === categoryKey
             );
 
@@ -494,24 +697,31 @@
             const totalCartonsEl = document.getElementById('total-cartons');
             const totalAmountEl = document.getElementById('total-amount');
             const placeOrderBtn = document.getElementById('place-order-btn');
-            const sendOrderBtn = document.getElementById('send-order-btn');
+            const orderActionsContainer = document.getElementById('order-actions'); // New container
 
             const itemIds = Object.keys(cart);
             let totalCartons = 0;
             let totalAmount = 0;
             let containsEnquiryItem = false;
+            
+            // Determine if customer data is minimally filled
+            const isCustomerSetup = window.customerData && 
+                                   window.customerData.customerID !== "GUEST001" && 
+                                   window.customerData.name && 
+                                   window.customerData.address !== "N/A";
 
             if (itemIds.length === 0) {
                 cartItemsContainer.innerHTML = `<p class="text-center text-gray-500 p-4">${T('emptyCart')}</p>`;
                 totalCartonsEl.textContent = '0';
                 totalAmountEl.textContent = 'HK$0.00';
+                placeOrderBtn.classList.remove('hidden');
+                orderActionsContainer.classList.add('hidden'); // Hide all post-submit actions
                 placeOrderBtn.disabled = true;
-                sendOrderBtn.classList.add('hidden'); // 隱藏 WhatsApp 按鈕
                 return;
             }
 
             let cartHtml = itemIds.map(itemId => {
-                const item = PRODUCTS.find(p => p.id === itemId);
+                const item = window.PRODUCTS.find(p => p.id === itemId);
                 const qty = cart[itemId];
                 if (!item) return '';
                 
@@ -547,26 +757,36 @@
             totalCartonsEl.textContent = totalCartons;
             totalAmountEl.textContent = `HK$${totalAmount.toFixed(2)}`;
             
-            // 訂單提交邏輯：若含有查詢貨品或訂單為空，則禁用兩個按鈕
-            const disableButtons = containsEnquiryItem || (totalCartons === 0);
-            placeOrderBtn.disabled = disableButtons;
-            sendOrderBtn.disabled = disableButtons;
+            // 訂單提交邏輯：若含有查詢貨品或訂單為空，則禁用提交按鈕
+            const disableSubmission = containsEnquiryItem || (totalCartons === 0) || !isCustomerSetup;
             
-            // 只有在 "Place Order (Simulated)" 成功後，WhatsApp 按鈕才會被顯示
+            // 顯示/隱藏提交按鈕和後續操作容器
             if (placeOrderBtn.hasAttribute('data-order-submitted')) {
-                sendOrderBtn.classList.remove('hidden');
                 placeOrderBtn.classList.add('hidden');
+                orderActionsContainer.classList.remove('hidden'); // Show WhatsApp/IIF buttons
+                lastOrderID ? document.getElementById('order-qr-data').textContent = `${T('orderID')}: ${lastOrderID}` : '';
             } else {
-                sendOrderBtn.classList.add('hidden');
                 placeOrderBtn.classList.remove('hidden');
+                orderActionsContainer.classList.add('hidden'); // Hide WhatsApp/IIF buttons
+            }
+            
+            placeOrderBtn.disabled = disableSubmission;
+            
+            // 顯示/隱藏客戶資料警告
+            const customerWarning = document.getElementById('customer-info-warning');
+            if (!isCustomerSetup && totalCartons > 0) {
+                 customerWarning.classList.remove('hidden');
+                 customerWarning.textContent = T('fillCustomerInfo');
+            } else {
+                 customerWarning.classList.add('hidden');
             }
 
-            // Show warning if cart contains enquiry items
+            // Show enquiry warning
             const enquiryWarning = document.getElementById('enquiry-warning');
             if (containsEnquiryItem) {
                 enquiryWarning.classList.remove('hidden');
-                placeOrderBtn.classList.add('hidden'); // 隱藏模擬提交按鈕
-                sendOrderBtn.classList.add('hidden'); // 隱藏 WhatsApp 按鈕
+                placeOrderBtn.classList.add('hidden'); 
+                orderActionsContainer.classList.add('hidden'); 
                 enquiryWarning.textContent = currentLang === 'cn' 
                     ? '⚠️ 您的訂單包含「請向我們查詢」貨品，無法計算總金額並提交。請先移除或聯繫我們報價。'
                     : '⚠️ Your order contains "Price Upon Enquiry" items. Total amount cannot be calculated/submitted. Please remove or contact us for a quote.';
@@ -585,6 +805,7 @@
             // 每次打開購物車時，重置訂單狀態
             const placeOrderBtn = document.getElementById('place-order-btn');
             placeOrderBtn.removeAttribute('data-order-submitted');
+            lastOrderID = null;
             
             renderCart();
         }
@@ -593,7 +814,7 @@
             event.preventDefault();
             const qtyInput = document.getElementById(`qty-${productId}`);
             const qty = parseInt(qtyInput.value, 10);
-            const product = PRODUCTS.find(p => p.id === productId);
+            const product = window.PRODUCTS.find(p => p.id === productId);
 
             if (product.price === 9999.00) {
                 showModal('此貨品需查詢報價，暫不能直接下單。 (Price Upon Enquiry)', 'error');
@@ -630,6 +851,7 @@
             
             // 重置訂單狀態
             document.getElementById('place-order-btn').removeAttribute('data-order-submitted');
+            lastOrderID = null;
             
             renderCart();
             updateCartButtonCount();
@@ -640,11 +862,80 @@
             document.getElementById('cart-count').textContent = count;
         }
         
-        // ** 新增：生成 WhatsApp 訊息並導向 **
+        // ** IIF File Generation Logic **
+        function generateIIFContent(orderId) {
+            const customer = window.customerData;
+            // IMPORTANT: Quickbooks IIF requires M/D/Y format.
+            const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+            
+            let iifContent = `!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tSHIPTOADDRESS\n`;
+            iifContent += `!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tMEMO\tITEM\tQTY\tRATE\tPRICE\n`;
+            iifContent += `!ENDTRNS\n`;
+
+            let totalAmount = 0;
+            let itemLines = '';
+            
+            // 1. Generate SPL lines for each item (Sales Receipt or Invoice Items)
+            Object.keys(cart).forEach((itemId, index) => {
+                const item = window.PRODUCTS.find(p => p.id === itemId);
+                const qty = cart[itemId];
+                const price = item.price;
+                const lineTotal = price * qty;
+                totalAmount += lineTotal;
+                
+                // Assuming Quickbooks uses the product ID as the Item code (must match Quickbooks setup)
+                // QTY is positive for Sales/Invoice
+                // Account for Sales: 'Sales' (Must match your QB Chart of Accounts)
+                itemLines += `SPL\t\tINVOICE\t${today}\tSales\t${customer.customerID}\t${lineTotal.toFixed(2)}\t${orderId}\t${item.cn} (${item.details})\t${item.id}\t${qty}\t${price.toFixed(2)}\t${lineTotal.toFixed(2)}\n`;
+            });
+            
+            // 2. Generate TRNS line (Invoice Header)
+            // Assuming "Accounts Receivable" as the account for the invoice total
+            const formattedAddress = customer.address.replace(/\n/g, ' '); // IIF requires single line for address field
+            
+            iifContent += `TRNS\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${totalAmount.toFixed(2)}\t${orderId}\tWholesale Order for ${customer.name}\t${formattedAddress}\n`;
+            
+            // 3. Append item SPL lines
+            iifContent += itemLines;
+            
+            // 4. Generate final TRNS closing SPL line for A/R balance
+            // This line balances the transaction against A/R
+            iifContent += `SPL\t\tINVOICE\t${today}\tAccounts Receivable\t${customer.customerID}\t${(-totalAmount).toFixed(2)}\t${orderId}\tInvoice Total Balance\n`;
+            
+            iifContent += `ENDTRNS\n`;
+
+            return iifContent;
+        }
+
+        function downloadIIF() {
+            if (!lastOrderID) {
+                showModal("請先提交訂單。 (Please submit the order first.)", 'error');
+                return;
+            }
+            
+            const iifContent = generateIIFContent(lastOrderID);
+            const blob = new Blob([iifContent], { type: 'text/plain;charset=utf-8' });
+            
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `NICEONE_ORDER_${lastOrderID}_${window.customerData.customerID}.iif`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            showModal("IIF 文件已下載！請導入 Quickbooks Desktop。", 'info');
+        }
+
+        // ** WhatsApp Message and QR Code Logic **
         function sendOrderViaWhatsApp() {
+            if (!lastOrderID) {
+                 showModal("請先提交訂單。 (Please submit the order first.)", 'error');
+                return;
+            }
+            
             // 1. 整理訂單詳情
             const orderDetails = Object.keys(cart).map(itemId => {
-                const item = PRODUCTS.find(p => p.id === itemId);
+                const item = window.PRODUCTS.find(p => p.id === itemId);
                 const qty = cart[itemId];
                 const productName = item[currentLang];
                 const price = item.price.toFixed(2);
@@ -656,7 +947,7 @@
             const totalCartons = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
             let totalAmount = 0;
             Object.keys(cart).forEach(itemId => {
-                const item = PRODUCTS.find(p => p.id === itemId);
+                const item = window.PRODUCTS.find(p => p.id === itemId);
                 if (item.price !== 9999.00) {
                     totalAmount += item.price * cart[itemId];
                 }
@@ -667,9 +958,16 @@
             const totalCartonsText = T('whatsappMessageTotalCartons');
             const note = T('whatsappMessageNote');
             
+            const qrCodeContent = `NICEONE_ORDER_${lastOrderID}`;
+            
             const whatsappMessage = 
                 `${messageTitle}\n` +
                 `============================\n` +
+                `客戶名稱: ${window.customerData.name}\n` +
+                `客戶編號: ${window.customerData.customerID}\n` +
+                `聯繫電話: ${window.customerData.phone}\n` +
+                `送貨地址: ${window.customerData.address}\n` +
+                `${T('orderID')}: ${lastOrderID}\n` +
                 `\n` +
                 `訂單詳情 (Order Details):\n` +
                 `${orderDetails}\n` +
@@ -679,31 +977,43 @@
                 `${totalAmountText}: HK$${totalAmount.toFixed(2)}\n` +
                 `============================\n` +
                 `\n` +
-                `${note} ${APP_ID})`;
+                `${note}\n` +
+                `倉庫貼紙二維碼內容:\n${qrCodeContent}`; // Mention the QR code content clearly
 
             // 2. 編碼訊息
             const encodedMessage = encodeURIComponent(whatsappMessage);
 
-            // 3. 構造 WhatsApp 連結 (使用 852 區號，因為是香港公司)
+            // 3. 構造 WhatsApp 連結 (使用 852 區號)
             const whatsappLink = `https://wa.me/852${WHATSAPP_NUMBER}?text=${encodedMessage}`;
             
             // 4. 打開連結
             window.open(whatsappLink, '_blank');
         }
 
+        // ** Main Order Submission **
         function placeOrder() {
             if (Object.keys(cart).length === 0) {
                 showModal(T('emptyCart'));
                 return;
             }
+            
+            // 最終檢查客戶資料是否填寫
+            if (window.customerData.customerID === "GUEST001" || !window.customerData.name || window.customerData.address === "N/A") {
+                 showModal(T('fillCustomerInfo'), 'error');
+                 return;
+            }
 
             // 確保沒有查詢貨品
-            const containsEnquiry = Object.keys(cart).some(id => PRODUCTS.find(p => p.id === id)?.price === 9999.00);
+            const containsEnquiry = Object.keys(cart).some(id => window.PRODUCTS.find(p => p.id === id)?.price === 9999.00);
             if (containsEnquiry) {
                 showModal('訂單包含需查詢報價的貨品，請先移除。', 'error');
                 return;
             }
 
+            // SIMULATION: Generate unique Order ID
+            const orderId = `SO-${Date.now()}`;
+            lastOrderID = orderId;
+            
             // SIMULATION: Quickbooks API Call & Stock Reduction
             Object.entries(cart).forEach(([id, qty]) => {
                 const currentStock = MOCK_INVENTORY_SYSTEM.get(id);
@@ -712,16 +1022,60 @@
                 }
             });
             
-            // 模擬 Quickbooks 提交成功後，將按鈕切換為 WhatsApp
+            // SIMULATION: Save Order to Firestore (Private Data - Example)
+            if (window.fb.isReady && window.fb.db) {
+                 const db = window.fb.db;
+                 const userId = window.fb.userId;
+                 
+                 const orderData = {
+                     orderId: orderId,
+                     customer: window.customerData,
+                     items: cart, // {productId: qty}
+                     timestamp: firebase.firestore.serverTimestamp(),
+                     status: 'Pending',
+                     totalCartons: Object.values(cart).reduce((sum, qty) => sum + qty, 0)
+                 };
+                 
+                 const docRef = doc(db, `artifacts/${APP_ID}/users/${userId}/orders/${orderId}`);
+                 setDoc(docRef, orderData)
+                    .then(() => console.log("Order saved to Firestore:", orderId))
+                    .catch(e => console.error("Error saving order:", e));
+            }
+
+            // 模擬 Quickbooks 提交成功後，將按鈕切換為後續操作
             const placeOrderBtn = document.getElementById('place-order-btn');
             placeOrderBtn.setAttribute('data-order-submitted', 'true');
             
-            renderCart(); // 刷新以顯示 WhatsApp 按鈕
-            renderProducts(currentFilter); // 刷新產品列表以更新庫存
+            renderCart(); // 刷新以顯示後續操作按鈕
 
-            showModal(T('orderSuccess'), 'success');
+            // Show success modal with QR code generation
+            showSuccessModalWithQR(orderId);
         }
+        
+        // Function to show QR code after successful submission
+        function showSuccessModalWithQR(orderId) {
+            const modal = document.getElementById('custom-modal-qr');
+            const modalMessage = document.getElementById('modal-message-qr');
+            
+            modalMessage.innerHTML = `${T('orderSuccess')} <br> ${T('orderID')}: <span class="font-mono text-blue-600">${orderId}</span>`;
 
+            // Clear previous QR code and generate new one
+            const qrCodeContainer = document.getElementById('qrcode-container');
+            qrCodeContainer.innerHTML = '';
+            
+            // Generate QR Code with Order ID (NICEONE_ORDER_XXX) for warehouse stickering
+            new QRCode(qrCodeContainer, {
+                text: `NICEONE_ORDER_${orderId}`,
+                width: 128,
+                height: 128,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+            
+            modal.classList.remove('hidden');
+        }
+        
         // --- MODAL/MESSAGE BOX UTILITY (Replaces alert()) ---
 
         function showModal(message, type = 'info') {
@@ -755,7 +1109,7 @@
             }
 
             // Initialize mock inventory for ALL new products (100 cartons of everything)
-            PRODUCTS.forEach(p => {
+            window.PRODUCTS.forEach(p => {
                 if (p.price !== 9999.00) { // Only track inventory for items with set price
                     MOCK_INVENTORY_SYSTEM.set(p.id, 100);
                 } else {
@@ -774,12 +1128,19 @@
 
             updateUILanguage();
             renderProducts('HOT_ITEMS'); // Initial load: Hot Items
-            renderCart();
+            window.setupCustomerForm(); // Setup customer form after global T is available
         };
+
+        // Expose critical functions globally
+        window.sendOrderViaWhatsApp = sendOrderViaWhatsApp;
+        window.placeOrder = placeOrder;
+        window.downloadIIF = downloadIIF;
+        window.showModal = showModal;
+        window.renderCart = renderCart; // Expose renderCart for Firebase script
 
     </script>
 
-    <!-- Modal Placeholder -->
+    <!-- Modal Placeholder for simple messages -->
     <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
         <div class="bg-white rounded-lg shadow-2xl max-w-sm w-full transform transition-all duration-300 scale-100">
             <div id="modal-header" class="p-4 text-white rounded-t-lg flex items-center justify-between bg-blue-500">
@@ -799,6 +1160,82 @@
         </div>
     </div>
     
+    <!-- Modal Placeholder for Order Success/QR Code -->
+    <div id="custom-modal-qr" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-start justify-center pt-20">
+        <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100">
+            <div class="p-4 bg-green-500 text-white rounded-t-lg flex items-center justify-between">
+                <span class="font-bold text-lg">✅ 訂單已處理成功 (Order Processed)</span>
+                <button onclick="document.getElementById('custom-modal-qr').classList.add('hidden'); cart = {}; updateCartButtonCount(); renderCart();" class="text-white hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6 text-center">
+                <p id="modal-message-qr" class="text-gray-700 text-lg mb-4 font-semibold"></p>
+                
+                <p class="text-sm text-gray-500 mb-2">倉庫掃描貼紙 (Warehouse Sticker QR Code)</p>
+                <div id="qrcode-container" class="mx-auto w-32 h-32 border-4 border-gray-200 rounded-lg mb-4">
+                    <!-- QR Code will be drawn here -->
+                </div>
+
+                <div class="flex flex-col space-y-2">
+                    <button onclick="downloadIIF(); document.getElementById('custom-modal-qr').classList.add('hidden');" 
+                        class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                        <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
+                    </button>
+                    <button onclick="sendOrderViaWhatsApp(); document.getElementById('custom-modal-qr').classList.add('hidden');"
+                        class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                        <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
+                    </button>
+                </div>
+                <p class="mt-4 text-xs text-gray-400">請完成以上操作後，重新開啟購物車以清空訂單。</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Placeholder for Customer Info Input -->
+    <div id="customer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden z-[1000] flex items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full m-4 transform transition-all duration-300">
+            <div class="p-4 bg-blue-600 text-white rounded-t-xl flex justify-between items-center">
+                <h3 class="text-xl font-bold" data-lang-key="customerInfo">客戶資料設定 (必填)</h3>
+                <button onclick="toggleCustomerModal()" class="p-1 rounded-full hover:bg-blue-700 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <form id="customer-form" class="p-6 space-y-4">
+                <div class="space-y-1">
+                    <label for="customer-name" class="block text-sm font-medium text-gray-700" data-lang-key="customerName">客戶名稱</label>
+                    <input type="text" id="customer-name" name="customer-name" required
+                        placeholder="恆立有限公司"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                 <div class="space-y-1">
+                    <label for="customer-id" class="block text-sm font-medium text-gray-700" data-lang-key="customerID">客戶編號 (Quickbooks/ERP ID)</label>
+                    <input type="text" id="customer-id" name="customer-id" required
+                        placeholder="CUST-001"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div class="space-y-1">
+                    <label for="customer-phone" class="block text-sm font-medium text-gray-700" data-lang-key="customerPhone">聯繫電話</label>
+                    <input type="tel" id="customer-phone" name="customer-phone" required
+                        placeholder="65752256"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div class="space-y-1">
+                    <label for="customer-address" class="block text-sm font-medium text-gray-700" data-lang-key="customerAddress">送貨地址</label>
+                    <textarea id="customer-address" name="customer-address" rows="3" required
+                        placeholder="香港荃灣景圖街1號利工業中心4AC"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
+                </div>
+                <div class="flex justify-end pt-2">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md" data-lang-key="customerSave">
+                        儲存客戶資料
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
     <!-- HEADER & FIXED NAVIGATION -->
     <header class="sticky-nav bg-white shadow-lg">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center border-b">
@@ -811,6 +1248,14 @@
             </div>
 
             <div class="flex items-center space-x-4">
+                <!-- Customer Info / Settings Button -->
+                <button onclick="toggleCustomerModal(); window.setupCustomerForm();" class="flex items-center space-x-2 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition duration-150">
+                     <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                     <div id="customer-info-display">
+                         <!-- Customer Name/ID will be displayed here -->
+                     </div>
+                </button>
+                
                 <button id="lang-toggle" onclick="switchLanguage()" class="px-3 py-1 text-sm rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
                     English
                 </button>
@@ -836,7 +1281,7 @@
         <!-- Quickbooks Simulation Notice -->
         <div class="mb-6 p-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-lg text-sm">
             <p class="font-bold inline" data-lang-key="aboutQBLayer"></p>
-            <span class="font-medium text-xs">(實際部署需連接 FireStore / QuickBook API)</span>
+            <span class="font-medium text-xs">(實際部署需連接 QuickBook API)</span>
         </div>
 
         <!-- Product List -->
@@ -860,6 +1305,9 @@
             </button>
         </div>
         
+        <!-- Customer Info Warning -->
+        <p id="customer-info-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
+
         <!-- Enquiry Warning -->
         <p id="enquiry-warning" class="text-sm p-3 bg-red-100 text-red-700 hidden"></p>
 
@@ -883,17 +1331,22 @@
             
             <!-- 提交訂單按鈕 (模擬 Quickbooks 提交) -->
             <button id="place-order-btn" onclick="placeOrder()" disabled
-                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                data-lang-key="placeOrder">
-                確認並提交訂單 (模擬)
+                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                <span data-lang-key="placeOrder">確認並提交訂單 (ERP模擬)</span>
             </button>
 
-            <!-- WhatsApp 發送按鈕 (成功提交 Quickbooks 後顯示) -->
-            <button id="send-order-btn" onclick="sendOrderViaWhatsApp()" disabled
-                class="hidden w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md"
-                data-lang-key="sendOrder">
-                發送訂單至 WhatsApp
-            </button>
+            <!-- 後續操作容器 (成功提交 Quickbooks 後顯示) -->
+            <div id="order-actions" class="hidden space-y-2">
+                <p id="order-qr-data" class="text-center text-sm font-semibold text-gray-600 mb-2"></p>
+                <button onclick="downloadIIF()"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                    <span data-lang-key="downloadIIF">下載 IIF 文件 (Quickbooks)</span>
+                </button>
+                 <button onclick="sendOrderViaWhatsApp()"
+                    class="w-full bg-whatsapp hover:bg-whatsapp-dark text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                    <span data-lang-key="sendOrder">發送訂單至 WhatsApp (含QR)</span>
+                </button>
+            </div>
         </div>
     </div>
     
